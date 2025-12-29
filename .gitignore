@@ -1,2 +1,7 @@
 yt-dlp-logs/
+<<<<<<< HEAD
 cookies.txt
+=======
+cookies.txt
+__pycache__/
+>>>>>>> bugfix/menu-interaction_x_functionality

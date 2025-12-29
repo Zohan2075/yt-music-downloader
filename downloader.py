@@ -20,7 +20,7 @@ import logging
 from colors import Colors
 from progress import ProgressBar
 from metadata import MetadataManager, FileNameFormatter
-from utils import COOKIES_FILE
+from utils import COOKIES_FILE, sanitize_folder_name, detected_js_runtime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -47,6 +47,19 @@ class VideoInfo:
     title: str
     metadata: Dict[str, str]
     url: str
+
+@dataclass
+class DownloadFailure:
+    """Represents a single video yt-dlp could not download"""
+    video_id: str
+    url: str
+    reason: str
+
+@dataclass
+class DownloadResult:
+    """Aggregate result of a yt-dlp run"""
+    success: bool
+    failures: List[DownloadFailure]
 
 class DownloadError(Exception):
     """Custom exception for download errors"""
@@ -102,19 +115,18 @@ class YTDLPWrapper:
         output_dir: Path,
         archive_file: Path,
         progress_callback: Optional[Callable[[int], None]] = None,
-        debug: bool = False
-    ) -> bool:
-        """Download multiple videos using yt-dlp
-
-        debug=True will write a verbose yt-dlp log to the playlist folder and
-        leave the batch file in place for inspection.
-        """
+        debug: bool = False,
+        log_file_path: Optional[Path] = None,
+    ) -> DownloadResult:
+        """Download multiple videos using yt-dlp and capture errors"""
         if not video_urls:
-            return True
+            return DownloadResult(success=True, failures=[])
             
         batch_file = output_dir / f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        log_file = output_dir / "yt-dlp-debug.log" if debug else None
+        log_file = None
         lf = None
+        failures: List[DownloadFailure] = []
+        seen_failure_ids: Set[str] = set()
         
         try:
             # Write video URLs to batch file
@@ -123,9 +135,12 @@ class YTDLPWrapper:
                     f.write(f"{url}\n")
             
             # Build command
-            cmd = [
-                "yt-dlp",
-            ]
+            cmd = ["yt-dlp"]
+
+            runtime = detected_js_runtime()
+            if runtime:
+                cmd.extend(["--js-runtime", runtime])
+                cmd.extend(["--remote-components", "ejs:github"])
 
             # In debug mode, add verbose flag
             if debug:
@@ -153,7 +168,9 @@ class YTDLPWrapper:
                 cmd.extend(["--cookies", str(Path(COOKIES_FILE))])
             
             # Open debug log if requested
-            if debug and log_file:
+            if debug:
+                log_file = log_file_path or (output_dir / "yt-dlp-debug.log")
+                log_file.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     lf = open(log_file, "a", encoding="utf-8")
                     lf.write(f"---- yt-dlp run: {datetime.now().isoformat()} ----\n")
@@ -200,6 +217,15 @@ class YTDLPWrapper:
                 # Log errors
                 if "[error]" in line.lower():
                     logger.error(f"yt-dlp error: {line}")
+
+                error_match = re.search(r"ERROR:\s+\[[^\]]+\]\s+([A-Za-z0-9_-]{11}):\s+(.*)", line)
+                if error_match:
+                    video_id = error_match.group(1)
+                    if video_id not in seen_failure_ids:
+                        reason = error_match.group(2).strip()
+                        url = next((url for url in video_urls if video_id in url), "")
+                        failures.append(DownloadFailure(video_id=video_id, url=url, reason=reason))
+                        seen_failure_ids.add(video_id)
             
             process.wait()
 
@@ -223,10 +249,12 @@ class YTDLPWrapper:
                     except Exception:
                         pass
 
-            return process.returncode == 0
+            return DownloadResult(success=(process.returncode == 0), failures=failures)
             
         except Exception as e:
             logger.error(f"Download failed: {e}")
+            if not failures:
+                failures.append(DownloadFailure(video_id="", url="", reason=str(e)))
             if lf:
                 try:
                     lf.write(f"Exception: {e}\n")
@@ -234,7 +262,7 @@ class YTDLPWrapper:
                     lf.close()
                 except Exception:
                     pass
-            return False
+            return DownloadResult(success=False, failures=failures)
         finally:
             # Clean up batch file unless debugging (keep for inspection)
             try:
@@ -526,19 +554,30 @@ class PlaylistSyncer:
             
             if debug:
                 print(f"{Colors.YELLOW}Debug download enabled: yt-dlp logs and batch files will be kept in {self.playlist.folder}{Colors.RESET}")
+                log_dir = Path("yt-dlp-logs")
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_path = log_dir / f"{sanitize_folder_name(self.playlist.name)}.log"
+                print(f"{Colors.GRAY}➡ yt-dlp log: {log_path.resolve()}{Colors.RESET}")
+            else:
+                log_path = None
 
-            success = self.ytdlp.download_videos(
+            result = self.ytdlp.download_videos(
                 video_urls=video_urls,
                 output_dir=self.playlist.folder,
                 archive_file=self.archive_file,
                 progress_callback=update_progress,
-                debug=debug
+                debug=debug,
+                log_file_path=log_path,
             )
+            success = result.success
             
             if success:
                 progress_bar.complete(f"✓ Downloaded {len(videos)}/{len(videos)}")
             else:
                 progress_bar.complete(f"⚠ Download issues occurred")
+
+            if result.failures:
+                self._report_failures(result.failures, log_path)
             
             return success
     
@@ -721,6 +760,33 @@ class PlaylistSyncer:
         
         if deleted_count > 0:
             print(f"{Colors.GREEN}✓ Deleted {deleted_count} image files{Colors.RESET}")
+
+    def _report_failures(self, failures: List[DownloadFailure], log_path: Optional[Path]):
+        """Print and persist a summary of download failures"""
+        if not failures:
+            return
+
+        print(f"\n{Colors.RED}❌ {len(failures)} download(s) failed:{Colors.RESET}")
+        for failure in failures:
+            label = failure.video_id or failure.url or "Unknown video"
+            print(f"  {Colors.RED}- {label}: {failure.reason}{Colors.RESET}")
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report_path = self.playlist.folder / "failed_downloads.txt"
+        lines = [f"[{timestamp}] Playlist: {self.playlist.name}\n"]
+        for failure in failures:
+            label = failure.video_id or failure.url or "unknown"
+            lines.append(f"- {label}: {failure.reason}\n")
+        lines.append("\n")
+
+        try:
+            with open(report_path, "a", encoding="utf-8") as report_file:
+                report_file.writelines(lines)
+        except Exception as exc:
+            logger.warning(f"Failed to write failure report: {exc}")
+
+        if log_path:
+            print(f"{Colors.GRAY}Check detailed log at {log_path.resolve()} for more context.{Colors.RESET}")
     
     def sync(self, mode: SyncMode = SyncMode.COMPLETE_SYNC, dry_run: bool = False, debug: bool = False) -> Dict[str, Any]:
         """
