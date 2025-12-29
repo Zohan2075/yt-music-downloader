@@ -79,6 +79,7 @@ def main() -> None:
         
         success_count = 0
         total_new_downloads = 0
+        total_removed = 0
         
         for i, playlist in enumerate(settings["playlists"], 1):
             print(f"\n{Colors.BLUE}[{i}/{len(settings['playlists'])}]{Colors.RESET}")
@@ -91,6 +92,7 @@ def main() -> None:
             if res.get("success", False):
                 success_count += 1
                 total_new_downloads += res.get("new_downloads", 0)
+                total_removed += res.get("removed_missing", 0)
             
             if i < len(settings['playlists']):
                 time.sleep(0.5)
@@ -103,6 +105,8 @@ def main() -> None:
             print(f"{Colors.GREEN}✓ New songs downloaded: {total_new_downloads}{Colors.RESET}")
         else:
             print(f"{Colors.YELLOW}✓ No new songs found to download{Colors.RESET}")
+        if total_removed > 0:
+            print(f"{Colors.RED}✓ Removed tracks no longer in the playlist: {total_removed}{Colors.RESET}")
         print(f"{Colors.GREEN}✓ New downloads were automatically cleaned & renamed{Colors.RESET}")
         print(f"{Colors.GREEN}✓ Location: {base_path}{Colors.RESET}")
         print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")

@@ -342,10 +342,12 @@ class FileProcessor:
     @staticmethod
     def get_audio_files(folder: Path) -> List[Path]:
         """Get all audio files in a folder"""
-        audio_files = []
+        audio_files: Set[Path] = set()
         for ext in FileProcessor.AUDIO_EXTENSIONS:
-            audio_files.extend(folder.glob(f"*{ext}"))
-            audio_files.extend(folder.glob(f"*{ext.upper()}"))
+            for file in folder.glob(f"*{ext}"):
+                audio_files.add(file)
+            for file in folder.glob(f"*{ext.upper()}"):
+                audio_files.add(file)
         return sorted(audio_files)
     
     @staticmethod
@@ -802,6 +804,7 @@ class PlaylistSyncer:
             "new_downloads": 0,
             "renamed": 0,
             "duplicates_removed": 0,
+            "removed_missing": 0,
             "success": True,
             "dry_run": dry_run
         }
@@ -830,16 +833,18 @@ class PlaylistSyncer:
         videos = self.get_playlist_videos()
         new_videos = self.get_new_videos(videos)
         
+        downloaded_count = 0
+        success = True
         if not new_videos:
             print(f"\n{Colors.GREEN}✓ All songs already downloaded{Colors.RESET}")
-            return {"new_downloads": 0, "renamed": 0, "duplicates_removed": 0}
-        
-        # Download new videos (no dry-run for actual download)
-        success = True
-        if not dry_run:
-            success = self.download_videos(new_videos, debug=debug)
         else:
-            print(f"{Colors.YELLOW}Dry-run: Skipping actual downloads ({len(new_videos)} videos){Colors.RESET}")
+            # Download new videos (no dry-run for actual download)
+            if not dry_run:
+                success = self.download_videos(new_videos, debug=debug)
+                downloaded_count = len(new_videos) if success else 0
+            else:
+                print(f"{Colors.YELLOW}Dry-run: Skipping actual downloads ({len(new_videos)} videos){Colors.RESET}")
+                downloaded_count = len(new_videos)
         
         # Clean only new downloads
         renamed = self._clean_new_downloads(dry_run=dry_run)
@@ -851,19 +856,23 @@ class PlaylistSyncer:
             self._delete_image_files()
         else:
             logger.debug("Dry-run: skipping temp file deletions and image deletions")
+
+        removed_missing = self.remove_missing_tracks(videos, dry_run=dry_run)
         
         # Show summary
         show_summary(
             folder=self.playlist.folder,
             total_files=len(self.file_processor.get_audio_files(self.playlist.folder)),
-            new_downloads=len(new_videos) if not dry_run else 0,
-            renamed=renamed
+            new_downloads=downloaded_count if not dry_run else len(new_videos),
+            renamed=renamed,
+            removed_missing=removed_missing
         )
         
         return {
-            "new_downloads": len(new_videos) if not dry_run else 0,
+            "new_downloads": downloaded_count if not dry_run else len(new_videos),
             "renamed": renamed,
-            "duplicates_removed": 0
+            "duplicates_removed": 0,
+            "removed_missing": removed_missing
         }
     
     def _sync_only_mode(self, dry_run: bool = False) -> Dict[str, Any]:
@@ -911,19 +920,23 @@ class PlaylistSyncer:
             self.cleanup_files()
         else:
             logger.debug("Dry-run: skipping cleanup operations")
+
+        removed_missing = self.remove_missing_tracks(videos, dry_run=dry_run)
         
         show_summary(
             folder=self.playlist.folder,
             total_files=len(self.file_processor.get_audio_files(self.playlist.folder)),
             new_downloads=len(new_videos) if not dry_run else 0,
             renamed=renamed,
-            duplicates_removed=duplicates
+            duplicates_removed=duplicates,
+            removed_missing=removed_missing
         )
         
         return {
             "new_downloads": len(new_videos) if not dry_run else 0,
             "renamed": renamed,
-            "duplicates_removed": duplicates
+            "duplicates_removed": duplicates,
+            "removed_missing": removed_missing
         }
     
     def _auto_new_mode(self) -> Dict[str, Any]:
@@ -932,6 +945,57 @@ class PlaylistSyncer:
         print(f"{Colors.YELLOW}🔄 New playlist detected. Running complete sync...{Colors.RESET}")
         
         return self._complete_sync_mode()
+
+    def remove_missing_tracks(self, playlist_videos: List[VideoInfo], dry_run: bool = False) -> int:
+        """Remove local files whose IDs or titles no longer exist in the playlist."""
+        playlist_ids = {video.id for video in playlist_videos if video.id}
+        playlist_names = set()
+        for video in playlist_videos:
+            clean_name = FileNameFormatter.format_filename(video.metadata)
+            normalized = self.file_processor.normalize_name(clean_name)
+            if normalized:
+                playlist_names.add(normalized)
+
+        audio_files = self.file_processor.get_audio_files(self.playlist.folder)
+        orphan_files: List[Tuple[Path, Optional[str]]] = []
+
+        for file in audio_files:
+            video_id = self.file_processor.extract_video_id(file.name)
+            metadata = self.metadata_manager.get_metadata(video_id or "", file.stem)
+            clean_name = FileNameFormatter.format_filename(metadata)
+            normalized_name = self.file_processor.normalize_name(clean_name)
+
+            remove_by_id = bool(video_id and video_id not in playlist_ids)
+            remove_by_name = bool(not video_id and normalized_name and normalized_name not in playlist_names)
+
+            if remove_by_id or remove_by_name:
+                orphan_files.append((file, video_id))
+
+        if not orphan_files:
+            return 0
+
+        print(f"\n{Colors.YELLOW}⚠ Removing {len(orphan_files)} file(s) no longer in the YouTube playlist{Colors.RESET}")
+        removed_count = 0
+
+        for file, video_id in orphan_files:
+            display_name = file.name
+            if dry_run:
+                print(f"  {Colors.YELLOW}Would remove: {display_name}{Colors.RESET}")
+                removed_count += 1
+                continue
+
+            if self._quarantine_file(file):
+                removed_count += 1
+                if video_id:
+                    self._remove_from_archive(video_id)
+                print(f"  {Colors.RED}🗑 Removed (moved to quarantine): {display_name}{Colors.RESET}")
+            else:
+                print(f"  {Colors.RED}❌ Failed to remove: {display_name}{Colors.RESET}")
+
+        if removed_count and not dry_run:
+            print(f"{Colors.GRAY}Removed files are stored in '{self.playlist.folder / 'quarantine'}'{Colors.RESET}")
+
+        return removed_count
     
     def _clean_new_downloads(self, dry_run: bool = False) -> int:
         """Clean only newly downloaded files"""
@@ -1000,7 +1064,8 @@ def show_summary(
     total_files: int,
     new_downloads: int = 0,
     renamed: int = 0,
-    duplicates_removed: int = 0
+    duplicates_removed: int = 0,
+    removed_missing: int = 0
 ):
     """Display sync summary"""
     print(f"\n{Colors.GREEN}{'─'*60}{Colors.RESET}")
@@ -1014,6 +1079,8 @@ def show_summary(
         print(f" 🗑️ Duplicates removed: {Colors.RED}{duplicates_removed}{Colors.RESET}")
     if renamed > 0:
         print(f" 🏷 Files renamed: {Colors.GREEN}{renamed}{Colors.RESET}")
+    if removed_missing > 0:
+        print(f" 🔁 Playlist removals applied: {Colors.RED}{removed_missing}{Colors.RESET}")
     
     print(f"{Colors.GREEN}{'─'*60}{Colors.RESET}")
 
