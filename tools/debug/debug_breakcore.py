@@ -41,8 +41,13 @@ for v in new[:20]:
 # Attempt a test download of the new videos into the temp folder and capture success
 if new:
     print('\n--- Starting test download into temporary folder ---')
-    ok = syncer.ytdlp.download_videos([v.url for v in new], output_dir=playlist_folder, archive_file=playlist_folder / 'archive.txt')
-    print('Download function returned:', ok)
+    result = syncer.ytdlp.download_videos([v.url for v in new], output_dir=playlist_folder, archive_file=playlist_folder / 'archive.txt')
+    print('Download function returned:', result.success)
+    if result.failures:
+        print('Failures detected:')
+        for failure in result.failures:
+            label = failure.video_id or failure.url or 'unknown'
+            print(f'- {label}: {failure.reason}')
 else:
     print('No new videos to download (nothing to test)')
 

@@ -9,13 +9,29 @@ import tkinter as tk
 from tkinter import filedialog
 from pathlib import Path
 
+from colors import Colors
+
 COOKIES_FILE = "cookies.txt"
+JS_RUNTIMES = ["node", "deno", "quickjs", "bun"]
+JS_RUNTIME = ""
 
 
 def ensure_dependencies() -> None:
     """Ensure required dependencies are installed"""
     if shutil.which("yt-dlp") is None:
         raise RuntimeError("yt-dlp not found in PATH. Please install yt-dlp.")
+
+    global JS_RUNTIME
+    runtime = JS_RUNTIME or _detect_js_runtime()
+    if runtime:
+        JS_RUNTIME = runtime
+    else:
+        print(f"{Colors.YELLOW}⚠ yt-dlp will miss formats without a JS runtime (node/deno/quickjs/bun).{Colors.RESET}")
+        print(f"{Colors.YELLOW}  Install one and ensure it's on PATH for best results.{Colors.RESET}")
+
+    if not Path(COOKIES_FILE).exists():
+        print(f"{Colors.YELLOW}⚠ Cookies file '{COOKIES_FILE}' not found. Age-restricted videos may fail.{Colors.RESET}")
+        print(f"{Colors.YELLOW}  Export cookies and place them next to this script when needed.{Colors.RESET}")
 
 
 def select_download_folder(current: str) -> str:
@@ -67,3 +83,15 @@ def get_video_id_from_filename(filename: str) -> str:
     """Extract YouTube video ID from filename"""
     match = re.search(r'\[([A-Za-z0-9_-]{11})\]', filename)
     return match.group(1) if match else ""
+
+
+def detected_js_runtime() -> str:
+    """Return the JS runtime detected on PATH (empty string if none)."""
+    return JS_RUNTIME
+
+
+def _detect_js_runtime() -> str:
+    for runtime in JS_RUNTIMES:
+        if shutil.which(runtime):
+            return runtime
+    return ""
