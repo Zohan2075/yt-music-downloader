@@ -5,6 +5,7 @@ Smart sync • Auto-download • Safe cleanup • Duplicate protection
 """
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -20,6 +21,7 @@ from utils import (
 )
 from settings import load_settings, save_settings, setup_preferences
 from downloader import PlaylistSyncer, PlaylistInfo, SyncMode
+from progress import ProgressBar
 
 ESCAPE_SENTINEL = "__SAFE_INPUT_ESC__"
 
@@ -60,6 +62,67 @@ def safe_input(prompt: str, default: str = "", allow_escape: bool = False) -> st
         return default
 
 
+def human_size(num_bytes: Optional[float]) -> str:
+    """Return human readable size string."""
+    if num_bytes is None or num_bytes <= 0:
+        return "--"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(num_bytes)
+    idx = 0
+    while value >= 1024 and idx < len(units) - 1:
+        value /= 1024
+        idx += 1
+    return f"{value:6.2f} {units[idx]}"
+
+
+def human_speed(num_bytes_per_sec: Optional[float]) -> str:
+    if num_bytes_per_sec is None or num_bytes_per_sec <= 0:
+        return "--/s"
+    return f"{human_size(num_bytes_per_sec)}/s"
+
+
+def human_eta(seconds: Optional[float]) -> str:
+    if seconds is None or seconds < 0:
+        return "--:--"
+    minutes, sec = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+    return f"{minutes:02d}:{sec:02d}"
+
+
+SIZE_TOKEN_RE = re.compile(r"(?P<value>[0-9]+(?:\.[0-9]+)?)(?P<unit>[KMGTP]?i?B)", re.IGNORECASE)
+CLI_PROGRESS_RE = re.compile(
+    r"\[download\]\s+(?P<percent>[0-9]+(?:\.[0-9]+)?)%.*?of\s+(?P<total>\S+)\s+at\s+(?P<speed>\S+)\s+ETA\s+(?P<eta>\S+)",
+    re.IGNORECASE,
+)
+CLI_DONE_RE = re.compile(
+    r"\[download\]\s+100%.*?of\s+(?P<total>\S+)\s+in\s+(?P<duration>\S+)\s+at\s+(?P<speed>\S+)",
+    re.IGNORECASE,
+)
+
+
+def parse_size_token(token: str) -> Optional[float]:
+    token = token.strip().replace("/s", "")
+    match = SIZE_TOKEN_RE.match(token)
+    if not match:
+        return None
+    value = float(match.group("value"))
+    unit = match.group("unit").lower()
+    multiplier = {
+        "b": 1,
+        "kb": 1000,
+        "kib": 1024,
+        "mb": 1000 ** 2,
+        "mib": 1024 ** 2,
+        "gb": 1000 ** 3,
+        "gib": 1024 ** 3,
+        "tb": 1000 ** 4,
+        "tib": 1024 ** 4,
+    }.get(unit, 1)
+    return value * multiplier
+
+
 def run_single_download_flow(settings: Dict[str, Any]) -> None:
     """Interactive flow for downloading a single video/audio file."""
     print(f"\n{Colors.GREEN}{'='*60}{Colors.RESET}")
@@ -90,7 +153,14 @@ def run_single_download_flow(settings: Dict[str, Any]) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     print(f"{Colors.GREEN}✓ Destination locked: {target_dir}{Colors.RESET}")
 
-    print(f"\n{Colors.BLUE}3. Downloading & tagging{Colors.RESET}")
+    print(f"\n{Colors.BLUE}3. Download & tag{Colors.RESET}")
+    planned_stub = sanitize_filename(title) or "downloaded_track"
+    cookies_ready = Path(COOKIES_FILE).exists()
+    print(
+        f"{Colors.GRAY}Format: bestaudio/best • Metadata tagging ✓ • Cookies: "
+        f"{'auto' if cookies_ready else 'not found'}{Colors.RESET}"
+    )
+    print(f"{Colors.GRAY}Output preview: {planned_stub}.<ext>{Colors.RESET}")
     success = download_single_video(url, target_dir, title)
     if success:
         print(f"{Colors.GREEN}🎉 Download complete! Check the folder above.{Colors.RESET}")
@@ -126,7 +196,65 @@ def fetch_video_title(url: str, timeout: int = 15) -> Optional[str]:
 
 
 def download_single_video(url: str, folder: Path, display_name: str) -> bool:
-    """Download a single video/audio file to the requested folder."""
+    """Download a single video/audio file with a rich, colored progress bar."""
+    try:
+        import yt_dlp  # type: ignore
+    except ImportError:
+        print(
+            f"{Colors.YELLOW}⚠ Python yt-dlp module not found; falling back to basic console output.{Colors.RESET}"
+        )
+        return _download_single_video_cli(url, folder, display_name)
+
+    return _download_single_video_with_api(yt_dlp, url, folder, display_name)
+
+
+def _download_single_video_with_api(yt_dlp_module: Any, url: str, folder: Path, display_name: str) -> bool:
+    safe_name = sanitize_filename(display_name) or "downloaded_track"
+    output_template = str(folder / f"{safe_name}.%(ext)s")
+
+    cookies_path = Path(COOKIES_FILE)
+    progress_bar = ProgressBar(total=1, width=36, title="Single download", show_counts=False)
+
+    def progress_hook(data: Dict[str, Any]) -> None:
+        status = data.get("status")
+        if status == "downloading":
+            total = data.get("total_bytes") or data.get("total_bytes_estimate")
+            downloaded = data.get("downloaded_bytes") or 0
+            speed = data.get("speed")
+            eta = data.get("eta")
+            status_text = (
+                f"{human_size(downloaded)} / {human_size(total)} • "
+                f"{human_speed(speed)} • ETA {human_eta(eta)}"
+            )
+            progress_bar.update(downloaded, total=total, status=status_text)
+        elif status == "finished":
+            progress_bar.update(progress_bar.total or progress_bar.current, status="Tagging & cleanup…")
+
+    ydl_opts: Dict[str, Any] = {
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "outtmpl": output_template,
+        "quiet": True,
+        "no_warnings": True,
+        "progress_hooks": [progress_hook],
+        "postprocessors": [{"key": "FFmpegMetadata"}],
+    }
+    if cookies_path.exists():
+        ydl_opts["cookiefile"] = str(cookies_path)
+
+    try:
+        with yt_dlp_module.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        progress_bar.complete("All done!")
+        return True
+    except Exception as exc:  # yt_dlp reports detailed context in message
+        print()
+        print(f"{Colors.RED}❌ yt-dlp error: {exc}{Colors.RESET}")
+        return False
+
+
+def _download_single_video_cli(url: str, folder: Path, display_name: str) -> bool:
+    """Fallback downloader using the yt-dlp CLI output (no fancy progress)."""
     safe_name = sanitize_filename(display_name) or "downloaded_track"
     output_template = str(folder / f"{safe_name}.%(ext)s")
 
@@ -136,6 +264,9 @@ def download_single_video(url: str, folder: Path, display_name: str) -> bool:
         "bestaudio/best",
         "--add-metadata",
         "--no-playlist",
+        "--newline",
+        "--progress",
+        "--no-warnings",
         "-o",
         output_template,
         url,
@@ -146,15 +277,74 @@ def download_single_video(url: str, folder: Path, display_name: str) -> bool:
         cmd.extend(["--cookies", str(cookies_path)])
 
     try:
-        print(f"{Colors.GRAY}Starting download...{Colors.RESET}")
-        result = subprocess.run(cmd, check=False)
-        return result.returncode == 0
+        print(f"{Colors.GRAY}Starting yt-dlp fallback download...{Colors.RESET}")
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        )
     except FileNotFoundError:
-        print(f"{Colors.RED}yt-dlp not found. Please install it first.{Colors.RESET}")
+        print(f"{Colors.RED}yt-dlp binary not found. Please install it first.{Colors.RESET}")
         return False
     except Exception as exc:
         print(f"{Colors.RED}Unexpected error: {exc}{Colors.RESET}")
         return False
+
+    progress_bar = ProgressBar(total=1, width=36, title="Single download", show_counts=False)
+    total_bytes: Optional[float] = None
+
+    assert process.stdout is not None
+    for raw_line in process.stdout:
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = CLI_PROGRESS_RE.search(line)
+        if match:
+            percent = float(match.group("percent"))
+            total_token = match.group("total")
+            speed_token = match.group("speed")
+            eta_token = match.group("eta")
+            total_bytes = total_bytes or parse_size_token(total_token)
+            downloaded = (
+                percent / 100.0 * total_bytes if (total_bytes and total_bytes > 0) else percent
+            )
+            status_text = (
+                f"{percent:5.1f}% • {speed_token} • ETA {eta_token} • total {total_token}"
+            )
+            progress_bar.update(downloaded, total=total_bytes or 100.0, status=status_text)
+            continue
+        match_done = CLI_DONE_RE.search(line)
+        if match_done:
+            total_token = match_done.group("total")
+            speed_token = match_done.group("speed")
+            duration_token = match_done.group("duration")
+            total_bytes = total_bytes or parse_size_token(total_token)
+            progress_bar.update(
+                total_bytes or progress_bar.total or 1,
+                total=total_bytes or progress_bar.total or 1,
+                status=f"Finished in {duration_token} @ {speed_token}",
+            )
+            continue
+        # Non-progress output (warnings/info)
+        print(f"\n{Colors.YELLOW}{line}{Colors.RESET}")
+
+    process.stdout.close()
+    stderr_output = process.stderr.read() if process.stderr else ""
+    return_code = process.wait()
+
+    if stderr_output.strip():
+        print(f"\n{Colors.YELLOW}{stderr_output.strip()}{Colors.RESET}")
+
+    if return_code == 0:
+        progress_bar.complete("All done!")
+        return True
+
+    progress_bar.update(progress_bar.current, status="Failed")
+    print(f"\n{Colors.RED}yt-dlp returned exit code {return_code}.{Colors.RESET}")
+    return False
 
 
 def main() -> None:
