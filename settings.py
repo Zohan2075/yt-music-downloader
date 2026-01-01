@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Tuple
 import tkinter as tk
 from tkinter import filedialog
 
-from utils import select_download_folder, sanitize_folder_name
+from utils import select_download_folder, sanitize_folder_name, extract_playlist_id
 from colors import Colors
 
 SETTINGS_FILE = "settings.json"
@@ -54,7 +54,7 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
     print(f"{Colors.BOLD}{'PLAYLIST SYNC SETUP':^60}{Colors.RESET}")
     print(f"{Colors.CYAN}{'='*60}{Colors.RESET}\n")
     
-    current = settings.get("download_path", "")
+    current = settings.get("download_path") or DEFAULT_SETTINGS["download_path"]
     print(f"{Colors.YELLOW}Current base folder:{Colors.RESET}")
     print(f" {Colors.GRAY}{current}{Colors.RESET}\n")
     
@@ -64,12 +64,40 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
         new_path = select_download_folder(current)
         settings["download_path"] = new_path
         print(f"{Colors.GREEN}✓ New folder: {new_path}{Colors.RESET}\n")
+        current = new_path
+    base_folder = Path(settings.get("download_path", DEFAULT_SETTINGS["download_path"]))
     
     print(f"{Colors.CYAN}{'-'*60}{Colors.RESET}")
     print(f"{Colors.BOLD}PLAYLIST MANAGEMENT{Colors.RESET}\n")
     
     existing = settings.get("playlists", [])
     new_playlists = []  # Track newly added playlists
+
+    existing_name_keys = {
+        pl.get("name", "").strip().lower()
+        for pl in existing
+        if pl.get("name")
+    }
+
+    existing_playlist_ids = set()
+    for pl in existing:
+        stored_id = pl.get("playlist_id") or extract_playlist_id(pl.get("url", ""))
+        if stored_id:
+            existing_playlist_ids.add(stored_id)
+
+    existing_folder_names = set()
+    for pl in existing:
+        name = pl.get("name", "")
+        if name:
+            existing_folder_names.add(sanitize_folder_name(name).lower())
+
+    try:
+        if base_folder.exists():
+            for child in base_folder.iterdir():
+                if child.is_dir():
+                    existing_folder_names.add(child.name.lower())
+    except Exception:
+        pass
     
     if existing:
         print(f"{Colors.YELLOW}Current playlists:{Colors.RESET}")
@@ -92,16 +120,43 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
             name = input(f" {Colors.BLUE}Folder name [{default_name}]: {Colors.RESET}").strip()
             if not name:
                 name = default_name
+
+            playlist_id = extract_playlist_id(url)
+            sanitized_name = sanitize_folder_name(name)
+            name_key = name.strip().lower()
+            folder_key = sanitized_name.lower()
+
+            if name_key and name_key in existing_name_keys:
+                print(f"{Colors.RED}Playlist name '{name}' already exists. Choose a different name.{Colors.RESET}\n")
+                continue
+
+            if folder_key in existing_folder_names:
+                print(
+                    f"{Colors.RED}Folder '{sanitized_name}' already exists in {base_folder}. Choose another name or remove the folder first.{Colors.RESET}\n"
+                )
+                continue
+
+            if playlist_id and playlist_id in existing_playlist_ids:
+                print(f"{Colors.RED}Playlist ID '{playlist_id}' is already configured locally. Use a different playlist.{Colors.RESET}\n")
+                continue
             
             new_playlist = {
                 "name": name.strip(),
                 "url": url,
                 "is_new": True  # Mark as new
             }
+            if playlist_id:
+                new_playlist["playlist_id"] = playlist_id
             
             # Add to both lists
             settings.setdefault("playlists", []).append(new_playlist)
             new_playlists.append(new_playlist)
+            existing.append(new_playlist)
+            if name_key:
+                existing_name_keys.add(name_key)
+            existing_folder_names.add(folder_key)
+            if playlist_id:
+                existing_playlist_ids.add(playlist_id)
             
             print(f"{Colors.GREEN}✓ Added '{name}'{Colors.RESET}\n")
         

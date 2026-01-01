@@ -8,6 +8,7 @@ import shutil
 import tkinter as tk
 from tkinter import filedialog
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 from colors import Colors
 
@@ -94,4 +95,24 @@ def _detect_js_runtime() -> str:
     for runtime in JS_RUNTIMES:
         if shutil.which(runtime):
             return runtime
+    return ""
+
+
+def extract_playlist_id(url: str) -> str:
+    """Extract the playlist ID from a YouTube/Music URL."""
+    if not url:
+        return ""
+
+    try:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        if "list" in params and params["list"]:
+            return params["list"][0]
+
+        match = re.search(r"list=([A-Za-z0-9_-]+)", url)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+
     return ""
