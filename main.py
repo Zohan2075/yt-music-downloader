@@ -5,12 +5,19 @@ Smart sync • Auto-download • Safe cleanup • Duplicate protection
 """
 
 import os
+import subprocess
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import time
 
 from colors import Colors, print_banner
-from utils import ensure_dependencies, select_download_folder, sanitize_folder_name
+from utils import (
+    ensure_dependencies,
+    select_download_folder,
+    sanitize_folder_name,
+    sanitize_filename,
+    COOKIES_FILE,
+)
 from settings import load_settings, save_settings, setup_preferences
 from downloader import PlaylistSyncer, PlaylistInfo, SyncMode
 
@@ -53,6 +60,103 @@ def safe_input(prompt: str, default: str = "", allow_escape: bool = False) -> st
         return default
 
 
+def run_single_download_flow(settings: Dict[str, Any]) -> None:
+    """Interactive flow for downloading a single video/audio file."""
+    print(f"\n{Colors.GREEN}{'='*60}{Colors.RESET}")
+    print(f"{Colors.BOLD}⬇ SINGLE DOWNLOAD MODE{Colors.RESET}")
+    print(f"{Colors.GRAY}Grab a one-off track or video without touching your playlists.{Colors.RESET}")
+
+    url = safe_input(
+        f"\n{Colors.BLUE}Paste the YouTube / YT Music link (ESC to cancel): {Colors.RESET}",
+        allow_escape=True,
+    ).strip()
+    if url == ESCAPE_SENTINEL or not url:
+        print(f"{Colors.YELLOW}⏹ Cancelled single download.{Colors.RESET}")
+        print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
+        return
+
+    print(f"\n{Colors.BLUE}1. Fetching metadata...{Colors.RESET}")
+    title = fetch_video_title(url)
+    if not title:
+        print(f"{Colors.YELLOW}⚠ Could not detect the title. Using a generic name.{Colors.RESET}")
+        title = "downloaded_track"
+    else:
+        print(f"{Colors.GREEN}✓ Original title detected: {title}{Colors.RESET}")
+
+    default_base = settings.get("download_path") or str(Path.home())
+    print(f"\n{Colors.BLUE}2. Choose destination folder{Colors.RESET}")
+    print(f"{Colors.GRAY}Default base: {default_base}{Colors.RESET}")
+    target_dir = Path(select_download_folder(default_base))
+    target_dir.mkdir(parents=True, exist_ok=True)
+    print(f"{Colors.GREEN}✓ Destination locked: {target_dir}{Colors.RESET}")
+
+    print(f"\n{Colors.BLUE}3. Downloading & tagging{Colors.RESET}")
+    success = download_single_video(url, target_dir, title)
+    if success:
+        print(f"{Colors.GREEN}🎉 Download complete! Check the folder above.{Colors.RESET}")
+    else:
+        print(f"{Colors.RED}❌ Download failed. See details above and try again.{Colors.RESET}")
+    print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
+
+
+def fetch_video_title(url: str, timeout: int = 15) -> Optional[str]:
+    """Use yt-dlp to fetch a video's original title."""
+    try:
+        cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "--skip-download",
+            "--print",
+            "%(title)s",
+            url,
+        ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        title = result.stdout.strip().splitlines()
+        return title[0] if title else None
+    except Exception:
+        return None
+
+
+def download_single_video(url: str, folder: Path, display_name: str) -> bool:
+    """Download a single video/audio file to the requested folder."""
+    safe_name = sanitize_filename(display_name) or "downloaded_track"
+    output_template = str(folder / f"{safe_name}.%(ext)s")
+
+    cmd = [
+        "yt-dlp",
+        "-f",
+        "bestaudio/best",
+        "--add-metadata",
+        "--no-playlist",
+        "-o",
+        output_template,
+        url,
+    ]
+
+    cookies_path = Path(COOKIES_FILE)
+    if cookies_path.exists():
+        cmd.extend(["--cookies", str(cookies_path)])
+
+    try:
+        print(f"{Colors.GRAY}Starting download...{Colors.RESET}")
+        result = subprocess.run(cmd, check=False)
+        return result.returncode == 0
+    except FileNotFoundError:
+        print(f"{Colors.RED}yt-dlp not found. Please install it first.{Colors.RESET}")
+        return False
+    except Exception as exc:
+        print(f"{Colors.RED}Unexpected error: {exc}{Colors.RESET}")
+        return False
+
+
 def main() -> None:
     """Main orchestrator function"""
     print_banner()
@@ -67,14 +171,15 @@ def main() -> None:
     # Load settings
     settings = load_settings()
     
-    # Main menu - SIMPLIFIED: Only 2 options now
+    # Main menu - SIMPLIFIED: Only 3 options now
     print(f"{Colors.BLUE}Main Menu:{Colors.RESET}")
-    print(f" 1. Sync and Auto-download.")
+    print(f" 1. Sync and Auto-download/deletion")
     print(f" 2. Add or Remove Playlist")
+    print(f" 3. Download a single song/video")
     print(f" X. Exit (press ESC to exit)")
     
     main_choice = safe_input(
-        f"\n{Colors.BLUE}Select option (1/2 or X to exit) [1]: {Colors.RESET}",
+        f"\n{Colors.BLUE}Select option (1/2/3 or X to exit) [1]: {Colors.RESET}",
         default="1",
         allow_escape=True,
     )
@@ -93,6 +198,9 @@ def main() -> None:
         # Go to settings configuration
         setup_preferences(settings)
         print(f"\n{Colors.GREEN}✓ Settings updated. Restart the program to sync.{Colors.RESET}")
+        return
+    if normalized_choice == "3":
+        run_single_download_flow(settings)
         return
     
     # Check if we have playlists to sync
