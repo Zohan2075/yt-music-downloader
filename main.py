@@ -36,15 +36,14 @@ def main() -> None:
     # Load settings
     settings = load_settings()
     
-    # Main menu - SIMPLIFIED: Only 3 options now
+    # Main menu - SIMPLIFIED: Only 2 options now
     print(f"{Colors.BLUE}Main Menu:{Colors.RESET}")
     print(f" 1. Sync and Auto-download.")
-    print(f" 2. Sync & organize existing library")
-    print(f" 3. Add or Remove Playlist")
+    print(f" 2. Add or Remove Playlist")
     
-    main_choice = safe_input(f"\n{Colors.BLUE}Select option (1/2/3) [1]: {Colors.RESET}", default="1")
+    main_choice = safe_input(f"\n{Colors.BLUE}Select option (1/2) [1]: {Colors.RESET}", default="1")
     
-    if main_choice == "3":
+    if main_choice == "2":
 
         # Go to settings configuration
         setup_preferences(settings)
@@ -111,70 +110,6 @@ def main() -> None:
         print(f"{Colors.GREEN}✓ Location: {base_path}{Colors.RESET}")
         print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
         
-    elif main_choice == "2":
-        # SYNC MODE: Only clean/organize existing files
-        print(f"\n{Colors.GREEN}🔄 SYNC MODE: Organizing existing library{Colors.RESET}")
-        print(f"{Colors.YELLOW}⚠ Will clean duplicates, rename files, and organize everything{Colors.RESET}")
-        print(f"{Colors.YELLOW}⚠ No new songs will be downloaded{Colors.RESET}")
-        print(f"{Colors.GRAY}Base folder: {base_path}{Colors.RESET}\n")
-        
-        success_count = 0
-        total_duplicates_removed = 0
-        total_files_renamed = 0
-        
-        apply_all = False
-        stop_processing = False
-        for i, playlist in enumerate(settings["playlists"], 1):
-            if stop_processing:
-                break
-            print(f"\n{Colors.BLUE}[{i}/{len(settings['playlists'])}]{Colors.RESET}")
-            folder = base_path / sanitize_folder_name(playlist.get('name','playlist'))
-            pl_info = PlaylistInfo(name=playlist.get('name','playlist'), url=playlist.get('url',''), folder=folder)
-            syncer = PlaylistSyncer(pl_info, settings)
-
-            # First run a dry-run to show proposed actions
-            print(f"\n{Colors.YELLOW}Running dry-run (no changes will be made)...{Colors.RESET}")
-            dry_res = syncer.sync(SyncMode.SYNC_ONLY, dry_run=True)
-
-            if apply_all:
-                confirm = 'a'
-            else:
-                confirm = safe_input(f"{Colors.BLUE}Apply these changes for this playlist? (y/N/a=apply all/s=stop): {Colors.RESET}", default="").lower()
-
-            if confirm == 'a':
-                apply_all = True
-                real_res = syncer.sync(SyncMode.SYNC_ONLY, dry_run=False)
-            elif confirm == 'y':
-                real_res = syncer.sync(SyncMode.SYNC_ONLY, dry_run=False)
-            elif confirm == 's':
-                print(f"{Colors.YELLOW}Stopping further processing.{Colors.RESET}")
-                stop_processing = True
-                break
-            else:
-                print(f"{Colors.YELLOW}Skipping changes for this playlist.{Colors.RESET}")
-                real_res = {"success": True, "renamed": 0, "duplicates_removed": 0}
-
-            if real_res.get("success", False):
-                success_count += 1
-                total_duplicates_removed += real_res.get("duplicates_removed", 0)
-                total_files_renamed += real_res.get("renamed", 0)
-
-            if i < len(settings['playlists']):
-                time.sleep(0.5)
-        
-        # Summary for Sync Mode
-        print(f"\n{Colors.GREEN}{'='*60}{Colors.RESET}")
-        print(f"{Colors.BOLD}✅ Library Sync Complete!{Colors.RESET}")
-        print(f"{Colors.GREEN}✓ Successfully organized: {success_count}/{len(settings['playlists'])} playlists{Colors.RESET}")
-        print(f"{Colors.GREEN}✓ All files named as: Artist - Track (Album){Colors.RESET}")
-        if total_duplicates_removed > 0:
-            print(f"{Colors.RED}✓ Duplicates removed: {total_duplicates_removed}{Colors.RESET}")
-        if total_files_renamed > 0:
-            print(f"{Colors.GREEN}✓ Files renamed: {total_files_renamed}{Colors.RESET}")
-        print(f"{Colors.GREEN}✓ Image files automatically deleted{Colors.RESET}")
-        print(f"{Colors.GREEN}✓ Location: {base_path}{Colors.RESET}")
-        print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
-
 
 if __name__ == "__main__":
     try:
