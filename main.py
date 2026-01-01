@@ -4,6 +4,7 @@ YouTube Playlist Manager - Main Orchestrator
 Smart sync • Auto-download • Safe cleanup • Duplicate protection
 """
 
+import os
 from pathlib import Path
 from typing import List, Dict, Any
 import time
@@ -13,11 +14,41 @@ from utils import ensure_dependencies, select_download_folder, sanitize_folder_n
 from settings import load_settings, save_settings, setup_preferences
 from downloader import PlaylistSyncer, PlaylistInfo, SyncMode
 
+ESCAPE_SENTINEL = "__SAFE_INPUT_ESC__"
 
-def safe_input(prompt: str, default: str = "") -> str:
+
+def safe_input(prompt: str, default: str = "", allow_escape: bool = False) -> str:
     """Input wrapper that returns default on EOFError and strips whitespace."""
+    if allow_escape and os.name == "nt":
+        try:
+            import msvcrt  # type: ignore
+
+            print(prompt, end="", flush=True)
+            buffer: List[str] = []
+            while True:
+                ch = msvcrt.getwch()
+                if ch in ("\r", "\n"):
+                    print()
+                    value = ''.join(buffer).strip()
+                    return value or default
+                if ch == "\x1b":
+                    print()
+                    return ESCAPE_SENTINEL
+                if ch in ("\x08", "\x7f"):
+                    if buffer:
+                        buffer.pop()
+                        print("\b \b", end="", flush=True)
+                    continue
+                buffer.append(ch)
+                print(ch, end="", flush=True)
+        except Exception:
+            pass
     try:
-        return input(prompt).strip() or default
+        value = input(prompt)
+        value = value.strip()
+        if allow_escape and value == "\x1b":
+            return ESCAPE_SENTINEL
+        return value or default
     except EOFError:
         return default
 
@@ -40,10 +71,24 @@ def main() -> None:
     print(f"{Colors.BLUE}Main Menu:{Colors.RESET}")
     print(f" 1. Sync and Auto-download.")
     print(f" 2. Add or Remove Playlist")
+    print(f" X. Exit (press ESC to exit)")
     
-    main_choice = safe_input(f"\n{Colors.BLUE}Select option (1/2) [1]: {Colors.RESET}", default="1")
+    main_choice = safe_input(
+        f"\n{Colors.BLUE}Select option (1/2 or X to exit) [1]: {Colors.RESET}",
+        default="1",
+        allow_escape=True,
+    )
+
+    if main_choice == ESCAPE_SENTINEL:
+        print(f"\n{Colors.YELLOW}⏹ Exiting at user request.{Colors.RESET}")
+        return
     
-    if main_choice == "2":
+    normalized_choice = main_choice.lower()
+    if normalized_choice in {"x", "exit", "q"}:
+        print(f"\n{Colors.YELLOW}⏹ Exiting at user request.{Colors.RESET}")
+        return
+    
+    if normalized_choice == "2":
 
         # Go to settings configuration
         setup_preferences(settings)
@@ -64,7 +109,7 @@ def main() -> None:
     base_path = Path(settings["download_path"])
     base_path.mkdir(parents=True, exist_ok=True)
     
-    if main_choice == "1":
+    if normalized_choice == "1":
         # SYNC & AUTO-DOWNLOAD MODE: Sync playlists and auto-download new songs
         print(f"\n{Colors.GREEN}⬇ SYNC & AUTO-DOWNLOAD MODE: Syncing & auto-downloading new songs{Colors.RESET}")
         print(f"{Colors.YELLOW}⚠ Will sync playlists, download new songs, and auto-clean/rename them{Colors.RESET}")
