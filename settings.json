@@ -18,13 +18,23 @@
       "name": "Breakcore",
       "url": "https://music.youtube.com/playlist?list=PLwd6ZICxmLpgPauW5gaGWVBHP0gbpvzf9",
       "is_new": true
+    },
+    {
+      "name": "ttrhgf",
+      "url": "sdas",
+      "is_new": true
+    },
+    {
+      "name": "ttrhgf",
+      "url": "sdas",
+      "is_new": true
     }
   ],
   "max_workers": 4,
   "new_playlists": [
     {
-      "name": "Breakcore",
-      "url": "https://youtube.com/playlist?list=PLwd6ZICxmLpgPauW5gaGWVBHP0gbpvzf9&si=UnKUkkkLXjivHmjv",
+      "name": "ttrhgf",
+      "url": "sdas",
       "is_new": true
     }
   ]

@@ -3,4 +3,5 @@ cookies.txt
 metadata_cache.json
 __pycache__/
 debug_output/
+settings.json
 *.pyc
