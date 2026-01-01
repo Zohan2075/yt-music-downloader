@@ -2,4 +2,5 @@ yt-dlp-logs/
 cookies.txt
 metadata_cache.json
 __pycache__/
+debug_output/
 *.pyc
