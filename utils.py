@@ -9,8 +9,13 @@ import tkinter as tk
 from tkinter import filedialog
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+from typing import Optional, List
 
 from colors import Colors
+
+# Shared extension catalogs
+AUDIO_EXTENSIONS = {'.mp3', '.m4a', '.webm', '.opus', '.flac', '.wav', '.ogg'}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
 
 COOKIES_FILE = "cookies.txt"
 JS_RUNTIMES = ["node", "deno", "quickjs", "bun"]
@@ -35,6 +40,19 @@ def ensure_dependencies() -> None:
         print(f"{Colors.YELLOW}  Export cookies and place them next to this script when needed.{Colors.RESET}")
 
 
+def ytdlp_common_flags(debug: bool = False) -> List[str]:
+    """Common yt-dlp flags used across flows."""
+    if debug:
+        return ["-v"]
+    return ["--quiet", "--no-warnings", "--progress", "--newline"]
+
+
+def cookies_path_if_exists() -> Optional[Path]:
+    """Return cookies file Path if it exists, else None."""
+    p = Path(COOKIES_FILE)
+    return p if p.exists() else None
+
+
 def select_download_folder(current: str) -> str:
     """Open folder selector dialog"""
     root = tk.Tk()
@@ -49,18 +67,21 @@ def select_download_folder(current: str) -> str:
     return folder or current
 
 
+def sanitize_path_component(name: str, default: str = "") -> str:
+    """Sanitize a filesystem component, keeping ASCII-safe replacements."""
+    cleaned = re.sub(r'[<>:"/\\|?*]', '_', name)
+    cleaned = cleaned.strip().rstrip('.')
+    return cleaned or default
+
+
 def sanitize_folder_name(name: str) -> str:
     """Sanitize folder name for filesystem"""
-    name = re.sub(r'[<>:"/\\|?*]', '_', name)
-    name = name.strip().rstrip('.')
-    return name or "playlist"
+    return sanitize_path_component(name, default="playlist")
 
 
 def sanitize_filename(name: str) -> str:
     """Sanitize filename for filesystem"""
-    name = re.sub(r'[<>:"/\\|?*]', '_', name)
-    name = name.strip().rstrip('.')
-    return name
+    return sanitize_path_component(name)
 
 
 def get_file_extension(filename: str) -> str:
@@ -70,20 +91,27 @@ def get_file_extension(filename: str) -> str:
 
 def is_audio_file(filename: str) -> bool:
     """Check if file is an audio file"""
-    audio_extensions = {'.mp3', '.m4a', '.webm', '.opus', '.flac', '.wav', '.ogg'}
-    return get_file_extension(filename) in audio_extensions
+    return get_file_extension(filename) in AUDIO_EXTENSIONS
 
 
 def is_image_file(filename: str) -> bool:
     """Check if file is an image file"""
-    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
-    return get_file_extension(filename) in image_extensions
+    return get_file_extension(filename) in IMAGE_EXTENSIONS
 
 
 def get_video_id_from_filename(filename: str) -> str:
     """Extract YouTube video ID from filename"""
-    match = re.search(r'\[([A-Za-z0-9_-]{11})\]', filename)
-    return match.group(1) if match else ""
+    patterns = [
+        r"\[([A-Za-z0-9_-]{11})\]",
+        r"[?&]v=([A-Za-z0-9_-]{11})",
+        r"youtu\.be/([A-Za-z0-9_-]{11})",
+        r"watch\?v=([A-Za-z0-9_-]{11})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, filename)
+        if match:
+            return match.group(1)
+    return ""
 
 
 def detected_js_runtime() -> str:
@@ -116,3 +144,45 @@ def extract_playlist_id(url: str) -> str:
         pass
 
     return ""
+
+
+def normalize_url(url: str) -> str:
+    """Best-effort URL normalization for user input.
+
+    If the user pastes a YouTube domain without a scheme, prepend https://.
+    Leaves other inputs unchanged.
+    """
+    if not url:
+        return ""
+
+    value = url.strip()
+    if not value:
+        return ""
+
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme:
+            return value
+    except Exception:
+        return value
+
+    lowered = value.lower()
+    if lowered.startswith("www.") or "youtube." in lowered or "youtu.be" in lowered:
+        return f"https://{value.lstrip('/')}"
+
+    return value
+
+
+def is_probably_url(url: str) -> bool:
+    """Return True only for obvious http(s) URLs.
+
+    This intentionally does not try to validate every yt-dlp supported input.
+    """
+    value = normalize_url(url)
+    if not value:
+        return False
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    except Exception:
+        return False

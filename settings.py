@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Tuple
 import tkinter as tk
 from tkinter import filedialog
 
-from utils import select_download_folder, sanitize_folder_name, extract_playlist_id
+from utils import select_download_folder, sanitize_folder_name, extract_playlist_id, normalize_url, is_probably_url
 from colors import Colors
 
 SETTINGS_FILE = "settings.json"
@@ -31,6 +31,67 @@ def load_settings() -> Dict[str, Any]:
                 # Ensure new_playlists key exists for backward compatibility
                 if "new_playlists" not in settings:
                     settings["new_playlists"] = []
+
+                changed = False
+
+                def _dedupe_and_normalize_playlist_list(value: Any) -> Tuple[List[Dict[str, Any]], bool]:
+                    if not isinstance(value, list):
+                        return [], True
+
+                    cleaned: List[Dict[str, Any]] = []
+                    seen_keys: set[str] = set()
+                    local_changed = False
+
+                    for item in value:
+                        if not isinstance(item, dict):
+                            local_changed = True
+                            continue
+
+                        url = str(item.get("url", "") or "").strip()
+                        url_norm = normalize_url(url)
+                        if url_norm != url:
+                            item = {**item, "url": url_norm}
+                            local_changed = True
+
+                        playlist_id = item.get("playlist_id") or extract_playlist_id(url_norm)
+                        if playlist_id and item.get("playlist_id") != playlist_id:
+                            item = {**item, "playlist_id": playlist_id}
+                            local_changed = True
+
+                        key = (playlist_id or url_norm).strip().lower()
+                        if not key:
+                            local_changed = True
+                            continue
+                        if key in seen_keys:
+                            local_changed = True
+                            continue
+
+                        seen_keys.add(key)
+                        cleaned.append(item)
+
+                    return cleaned, local_changed
+
+                playlists, playlists_changed = _dedupe_and_normalize_playlist_list(settings.get("playlists", []))
+                new_playlists, new_playlists_changed = _dedupe_and_normalize_playlist_list(settings.get("new_playlists", []))
+
+                if playlists_changed:
+                    settings["playlists"] = playlists
+                    changed = True
+                if new_playlists_changed:
+                    settings["new_playlists"] = new_playlists
+                    changed = True
+
+                invalid = [pl for pl in settings.get("playlists", []) if not is_probably_url(pl.get("url", ""))]
+                if invalid:
+                    print(f"{Colors.YELLOW}⚠ Some configured playlists have invalid URLs and will fail:{Colors.RESET}")
+                    for pl in invalid:
+                        name = pl.get("name", "(unnamed)")
+                        url = pl.get("url", "")
+                        print(f"  - {name}: {Colors.GRAY}{url}{Colors.RESET}")
+
+                if changed:
+                    save_settings(settings)
+
                 return settings
         except Exception:
             pass
@@ -114,6 +175,11 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
             url = input(f" {Colors.BLUE}Playlist URL: {Colors.RESET}").strip()
             if not url:
                 print(f"{Colors.RED}URL required. Skipping.{Colors.RESET}\n")
+                continue
+
+            url = normalize_url(url)
+            if not is_probably_url(url):
+                print(f"{Colors.RED}That doesn't look like a valid URL: '{url}'. Skipping.{Colors.RESET}\n")
                 continue
             
             default_name = f"Playlist_{len(existing) + len(new_playlists) + 1}"

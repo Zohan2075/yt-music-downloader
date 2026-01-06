@@ -3,38 +3,38 @@
   "playlists": [
     {
       "name": "This is my heart",
-      "url": "https://music.youtube.com/playlist?list=PLwd6ZICxmLpj0vqGGNi9IXx72lOfTuKPo"
+      "url": "https://music.youtube.com/playlist?list=PLwd6ZICxmLpj0vqGGNi9IXx72lOfTuKPo",
+      "playlist_id": "PLwd6ZICxmLpj0vqGGNi9IXx72lOfTuKPo"
     },
     {
       "name": "Prog",
-      "url": "https://music.youtube.com/playlist?list=PLwd6ZICxmLpidoZ1IsoG1l0m5PYDBQF7N"
+      "url": "https://music.youtube.com/playlist?list=PLwd6ZICxmLpidoZ1IsoG1l0m5PYDBQF7N",
+      "playlist_id": "PLwd6ZICxmLpidoZ1IsoG1l0m5PYDBQF7N"
     },
     {
       "name": "The broken",
       "url": "https://music.youtube.com/playlist?list=PLwd6ZICxmLpjKpp5VUKDNpbV70SA0FTVA",
-      "is_new": true
+      "is_new": true,
+      "playlist_id": "PLwd6ZICxmLpjKpp5VUKDNpbV70SA0FTVA"
     },
     {
       "name": "Breakcore",
       "url": "https://music.youtube.com/playlist?list=PLwd6ZICxmLpgPauW5gaGWVBHP0gbpvzf9",
-      "is_new": true
+      "is_new": true,
+      "playlist_id": "PLwd6ZICxmLpgPauW5gaGWVBHP0gbpvzf9"
     },
     {
-      "name": "ttrhgf",
-      "url": "sdas",
-      "is_new": true
-    },
-    {
-      "name": "ttrhgf",
-      "url": "sdas",
-      "is_new": true
+      "name": "Rock",
+      "url": "https://www.youtube.com/playlist?list=PLwd6ZICxmLpjDlxIsTX6xfc-oxUdDs6ZC",
+      "is_new": true,
+      "playlist_id": "PLwd6ZICxmLpjDlxIsTX6xfc-oxUdDs6ZC"
     }
   ],
   "max_workers": 4,
   "new_playlists": [
     {
-      "name": "ttrhgf",
-      "url": "sdas",
+      "name": "Testing",
+      "url": "https://www.youtube.com/watch?v=Uoox9fpmDP0",
       "is_new": true
     }
   ]

@@ -8,6 +8,35 @@ from typing import Optional
 from colors import Colors
 
 
+def format_bytes(num_bytes: Optional[float]) -> str:
+    """Return human readable size string."""
+    if num_bytes is None or num_bytes <= 0:
+        return "--"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(num_bytes)
+    idx = 0
+    while value >= 1024 and idx < len(units) - 1:
+        value /= 1024
+        idx += 1
+    return f"{value:6.2f} {units[idx]}"
+
+
+def format_speed(num_bytes_per_sec: Optional[float]) -> str:
+    if num_bytes_per_sec is None or num_bytes_per_sec <= 0:
+        return "--/s"
+    return f"{format_bytes(num_bytes_per_sec)}/s"
+
+
+def format_eta(seconds: Optional[float]) -> str:
+    if seconds is None or seconds < 0:
+        return "--:--"
+    minutes, sec = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+    return f"{minutes:02d}:{sec:02d}"
+
+
 class ProgressBar:
     """Animated progress bar for terminal"""
 

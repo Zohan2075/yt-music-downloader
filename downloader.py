@@ -16,14 +16,26 @@ from typing import Dict, Any, List, Set, Tuple, Optional, Generator, Callable
 from dataclasses import dataclass
 from enum import Enum
 import logging
+import sys
 
 from colors import Colors
 from progress import ProgressBar
 from metadata import MetadataManager, FileNameFormatter
-from utils import COOKIES_FILE, sanitize_folder_name, detected_js_runtime
+from utils import (
+    COOKIES_FILE,
+    AUDIO_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    sanitize_folder_name,
+    detected_js_runtime,
+    get_video_id_from_filename,
+    cookies_path_if_exists,
+    ytdlp_common_flags,
+    normalize_url,
+    is_probably_url,
+)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging (use stdout so PowerShell piping stays clean)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class SyncMode(Enum):
@@ -143,10 +155,7 @@ class YTDLPWrapper:
                 cmd.extend(["--remote-components", "ejs:github"])
 
             # In debug mode, add verbose flag
-            if debug:
-                cmd.append("-v")
-            else:
-                cmd.extend(["--quiet", "--no-warnings", "--progress", "--newline"])
+            cmd.extend(ytdlp_common_flags(debug=debug))
 
             cmd.extend([
                 "-f", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio",
@@ -164,8 +173,9 @@ class YTDLPWrapper:
             ])
             
             # Add cookies if available (COOKIES_FILE is a string path)
-            if Path(COOKIES_FILE).exists():
-                cmd.extend(["--cookies", str(Path(COOKIES_FILE))])
+            cookies_path = cookies_path_if_exists()
+            if cookies_path:
+                cmd.extend(["--cookies", str(cookies_path)])
             
             # Open debug log if requested
             if debug:
@@ -274,12 +284,6 @@ class YTDLPWrapper:
 class FileProcessor:
     """Handles file operations and duplicate detection"""
     
-    # Common audio extensions
-    AUDIO_EXTENSIONS = {".webm", ".mp3", ".m4a", ".opus", ".flac", ".wav", ".ogg"}
-    
-    # Common image extensions
-    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff"}
-    
     @staticmethod
     def normalize_name(name: str) -> str:
         """Normalize a name for duplicate detection (Unicode-safe).
@@ -325,25 +329,14 @@ class FileProcessor:
     @staticmethod
     def extract_video_id(filename: str) -> Optional[str]:
         """Extract YouTube video ID from filename"""
-        patterns = [
-            r'\[([A-Za-z0-9_-]{11})\]',
-            r'[?&]v=([A-Za-z0-9_-]{11})',
-            r'youtu\.be/([A-Za-z0-9_-]{11})',
-            r'watch\?v=([A-Za-z0-9_-]{11})'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, filename)
-            if match:
-                return match.group(1)
-        
-        return None
+        vid = get_video_id_from_filename(filename)
+        return vid or None
     
     @staticmethod
     def get_audio_files(folder: Path) -> List[Path]:
         """Get all audio files in a folder"""
         audio_files: Set[Path] = set()
-        for ext in FileProcessor.AUDIO_EXTENSIONS:
+        for ext in AUDIO_EXTENSIONS:
             for file in folder.glob(f"*{ext}"):
                 audio_files.add(file)
             for file in folder.glob(f"*{ext.upper()}"):
@@ -456,11 +449,19 @@ class PlaylistSyncer:
         """Get all videos from playlist with metadata"""
         with self.operation_context("playlist scan"):
             print(f"\n{Colors.CYAN}📡 Scanning '{self.playlist.name}'...{Colors.RESET}")
+
+            normalized = normalize_url(self.playlist.url)
+            if normalized != self.playlist.url:
+                self.playlist.url = normalized
+
+            if not is_probably_url(self.playlist.url):
+                print(f"{Colors.RED}❌ Invalid playlist URL: {self.playlist.url}{Colors.RESET}")
+                raise DownloadError("Invalid playlist URL")
             
             playlist_data = self.ytdlp.get_playlist_info(self.playlist.url)
             if not playlist_data:
                 print(f"{Colors.RED}❌ Failed to scan playlist{Colors.RESET}")
-                return []
+                raise DownloadError("Failed to scan playlist")
             
             videos = []
             entries = playlist_data.get("entries", [])
@@ -752,7 +753,7 @@ class PlaylistSyncer:
         """Delete image files"""
         deleted_count = 0
         
-        for ext in self.file_processor.IMAGE_EXTENSIONS:
+        for ext in IMAGE_EXTENSIONS:
             for file in self.playlist.folder.glob(f"*{ext}"):
                 try:
                     file.unlink()

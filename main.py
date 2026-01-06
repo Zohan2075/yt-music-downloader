@@ -7,6 +7,7 @@ Smart sync • Auto-download • Safe cleanup • Duplicate protection
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import time
@@ -18,17 +19,21 @@ from utils import (
     sanitize_folder_name,
     sanitize_filename,
     COOKIES_FILE,
+    cookies_path_if_exists,
+    ytdlp_common_flags,
+    normalize_url,
+    is_probably_url,
 )
 from settings import load_settings, save_settings, setup_preferences
 from downloader import PlaylistSyncer, PlaylistInfo, SyncMode
-from progress import ProgressBar
+from progress import ProgressBar, format_bytes, format_speed, format_eta
 
 ESCAPE_SENTINEL = "__SAFE_INPUT_ESC__"
 
 
 def safe_input(prompt: str, default: str = "", allow_escape: bool = False) -> str:
     """Input wrapper that returns default on EOFError and strips whitespace."""
-    if allow_escape and os.name == "nt":
+    if allow_escape and os.name == "nt" and sys.stdin.isatty() and sys.stdout.isatty():
         try:
             import msvcrt  # type: ignore
 
@@ -60,35 +65,6 @@ def safe_input(prompt: str, default: str = "", allow_escape: bool = False) -> st
         return value or default
     except EOFError:
         return default
-
-
-def human_size(num_bytes: Optional[float]) -> str:
-    """Return human readable size string."""
-    if num_bytes is None or num_bytes <= 0:
-        return "--"
-    units = ["B", "KB", "MB", "GB", "TB"]
-    value = float(num_bytes)
-    idx = 0
-    while value >= 1024 and idx < len(units) - 1:
-        value /= 1024
-        idx += 1
-    return f"{value:6.2f} {units[idx]}"
-
-
-def human_speed(num_bytes_per_sec: Optional[float]) -> str:
-    if num_bytes_per_sec is None or num_bytes_per_sec <= 0:
-        return "--/s"
-    return f"{human_size(num_bytes_per_sec)}/s"
-
-
-def human_eta(seconds: Optional[float]) -> str:
-    if seconds is None or seconds < 0:
-        return "--:--"
-    minutes, sec = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
-    return f"{minutes:02d}:{sec:02d}"
 
 
 SIZE_TOKEN_RE = re.compile(r"(?P<value>[0-9]+(?:\.[0-9]+)?)(?P<unit>[KMGTP]?i?B)", re.IGNORECASE)
@@ -138,6 +114,13 @@ def run_single_download_flow(settings: Dict[str, Any]) -> None:
         print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
         return
 
+    url = normalize_url(url)
+    if not is_probably_url(url):
+        print(f"{Colors.RED}❌ That doesn't look like a valid URL: {url}{Colors.RESET}")
+        print(f"{Colors.YELLOW}⏹ Cancelled single download.{Colors.RESET}")
+        print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
+        return
+
     print(f"\n{Colors.BLUE}1. Fetching metadata...{Colors.RESET}")
     title = fetch_video_title(url)
     if not title:
@@ -155,7 +138,7 @@ def run_single_download_flow(settings: Dict[str, Any]) -> None:
 
     print(f"\n{Colors.BLUE}3. Download & tag{Colors.RESET}")
     planned_stub = sanitize_filename(title) or "downloaded_track"
-    cookies_ready = Path(COOKIES_FILE).exists()
+    cookies_ready = cookies_path_if_exists() is not None
     print(
         f"{Colors.GRAY}Format: bestaudio/best • Metadata tagging ✓ • Cookies: "
         f"{'auto' if cookies_ready else 'not found'}{Colors.RESET}"
@@ -212,7 +195,7 @@ def _download_single_video_with_api(yt_dlp_module: Any, url: str, folder: Path, 
     safe_name = sanitize_filename(display_name) or "downloaded_track"
     output_template = str(folder / f"{safe_name}.%(ext)s")
 
-    cookies_path = Path(COOKIES_FILE)
+    cookies_path = cookies_path_if_exists()
     progress_bar = ProgressBar(total=1, width=36, title="Single download", show_counts=False)
 
     def progress_hook(data: Dict[str, Any]) -> None:
@@ -223,8 +206,8 @@ def _download_single_video_with_api(yt_dlp_module: Any, url: str, folder: Path, 
             speed = data.get("speed")
             eta = data.get("eta")
             status_text = (
-                f"{human_size(downloaded)} / {human_size(total)} • "
-                f"{human_speed(speed)} • ETA {human_eta(eta)}"
+                f"{format_bytes(downloaded)} / {format_bytes(total)} • "
+                f"{format_speed(speed)} • ETA {format_eta(eta)}"
             )
             progress_bar.update(downloaded, total=total, status=status_text)
         elif status == "finished":
@@ -239,7 +222,7 @@ def _download_single_video_with_api(yt_dlp_module: Any, url: str, folder: Path, 
         "progress_hooks": [progress_hook],
         "postprocessors": [{"key": "FFmpegMetadata"}],
     }
-    if cookies_path.exists():
+    if cookies_path:
         ydl_opts["cookiefile"] = str(cookies_path)
 
     try:
@@ -258,22 +241,20 @@ def _download_single_video_cli(url: str, folder: Path, display_name: str) -> boo
     safe_name = sanitize_filename(display_name) or "downloaded_track"
     output_template = str(folder / f"{safe_name}.%(ext)s")
 
-    cmd = [
-        "yt-dlp",
+    cmd = ["yt-dlp"]
+    cmd.extend(ytdlp_common_flags(debug=False))
+    cmd.extend([
         "-f",
         "bestaudio/best",
         "--add-metadata",
         "--no-playlist",
-        "--newline",
-        "--progress",
-        "--no-warnings",
         "-o",
         output_template,
         url,
-    ]
+    ])
 
-    cookies_path = Path(COOKIES_FILE)
-    if cookies_path.exists():
+    cookies_path = cookies_path_if_exists()
+    if cookies_path:
         cmd.extend(["--cookies", str(cookies_path)])
 
     try:
@@ -349,6 +330,12 @@ def _download_single_video_cli(url: str, folder: Path, display_name: str) -> boo
 
 def main() -> None:
     """Main orchestrator function"""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
     print_banner()
     
     try:
