@@ -186,3 +186,20 @@ def is_probably_url(url: str) -> bool:
         return parsed.scheme in ("http", "https") and bool(parsed.netloc)
     except Exception:
         return False
+
+
+def looks_like_playlist_url(url: str) -> bool:
+    """Heuristic to detect playlist links so single-download mode can reject them."""
+    normalized = normalize_url(url)
+    if not normalized:
+        return False
+    try:
+        parsed = urlparse(normalized)
+        params = parse_qs(parsed.query)
+        if params.get("list"):
+            return True
+        if "playlist" in (parsed.path or ""):
+            return True
+        return False
+    except Exception:
+        return False

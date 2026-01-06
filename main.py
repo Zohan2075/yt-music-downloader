@@ -23,6 +23,7 @@ from utils import (
     ytdlp_common_flags,
     normalize_url,
     is_probably_url,
+    looks_like_playlist_url,
 )
 from settings import load_settings, save_settings, setup_preferences
 from downloader import PlaylistSyncer, PlaylistInfo, SyncMode
@@ -117,6 +118,12 @@ def run_single_download_flow(settings: Dict[str, Any]) -> None:
     url = normalize_url(url)
     if not is_probably_url(url):
         print(f"{Colors.RED}❌ That doesn't look like a valid URL: {url}{Colors.RESET}")
+        print(f"{Colors.YELLOW}⏹ Cancelled single download.{Colors.RESET}")
+        print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
+        return
+
+    if looks_like_playlist_url(url):
+        print(f"{Colors.YELLOW}⚠ That link points to a playlist. Use option 1 for playlist sync/downloads.{Colors.RESET}")
         print(f"{Colors.YELLOW}⏹ Cancelled single download.{Colors.RESET}")
         print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
         return
