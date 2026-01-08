@@ -28,14 +28,21 @@
       "url": "https://www.youtube.com/playlist?list=PLwd6ZICxmLpjDlxIsTX6xfc-oxUdDs6ZC",
       "is_new": true,
       "playlist_id": "PLwd6ZICxmLpjDlxIsTX6xfc-oxUdDs6ZC"
+    },
+    {
+      "name": "Testing",
+      "url": "https://youtube.com/playlist?list=PLwd6ZICxmLpjOCqrcFvqiKC9ivdn6HDSI&si=syksgIWs2ZVYR1h3",
+      "is_new": true,
+      "playlist_id": "PLwd6ZICxmLpjOCqrcFvqiKC9ivdn6HDSI"
     }
   ],
   "max_workers": 4,
   "new_playlists": [
     {
       "name": "Testing",
-      "url": "https://www.youtube.com/watch?v=Uoox9fpmDP0",
-      "is_new": true
+      "url": "https://youtube.com/playlist?list=PLwd6ZICxmLpjOCqrcFvqiKC9ivdn6HDSI&si=syksgIWs2ZVYR1h3",
+      "is_new": true,
+      "playlist_id": "PLwd6ZICxmLpjOCqrcFvqiKC9ivdn6HDSI"
     }
   ]
 }
