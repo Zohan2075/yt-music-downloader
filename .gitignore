@@ -5,3 +5,5 @@ __pycache__/
 debug_output/
 settings.json
 *.pyc
+youtube_autosync/
+*.code-workspace
