@@ -152,7 +152,6 @@ class YTDLPWrapper:
             runtime = detected_js_runtime()
             if runtime:
                 cmd.extend(["--js-runtime", runtime])
-                cmd.extend(["--remote-components", "ejs:github"])
 
             # In debug mode, add verbose flag
             cmd.extend(ytdlp_common_flags(debug=debug))
@@ -465,9 +464,21 @@ class PlaylistSyncer:
             
             videos = []
             entries = playlist_data.get("entries", [])
+
+            # If yt-dlp returns no entries, do NOT proceed with any removal logic.
+            # This commonly happens when the user pasted a non-playlist URL or when yt-dlp is blocked.
+            if not entries:
+                print(f"{Colors.RED}❌ No playlist entries found. Is this a real playlist URL?{Colors.RESET}")
+                raise DownloadError("Playlist contained no entries")
             
             # Process entries in parallel for better performance
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            try:
+                max_workers = int(self.settings.get("max_workers", 4))
+            except Exception:
+                max_workers = 4
+            max_workers = max(1, max_workers)
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
                 for entry in entries:
                     if entry and isinstance(entry, dict):
@@ -949,6 +960,12 @@ class PlaylistSyncer:
 
     def remove_missing_tracks(self, playlist_videos: List[VideoInfo], dry_run: bool = False) -> int:
         """Remove local files whose IDs or titles no longer exist in the playlist."""
+        if not playlist_videos:
+            print(
+                f"\n{Colors.YELLOW}⚠ Skipping removals: playlist scan returned 0 items. (Safety guard){Colors.RESET}"
+            )
+            return 0
+
         playlist_ids = {video.id for video in playlist_videos if video.id}
         playlist_names = set()
         for video in playlist_videos:

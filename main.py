@@ -365,7 +365,8 @@ def run_sync_mode(settings: Dict[str, Any]) -> None:
 
     for index, playlist in enumerate(playlists, 1):
         print(f"\n{Colors.BLUE}[{index}/{len(playlists)}]{Colors.RESET}")
-        folder = base_path / sanitize_folder_name(playlist.get("name", "playlist"))
+        folder_hint = playlist.get("folder") or playlist.get("name", "playlist")
+        folder = base_path / sanitize_folder_name(str(folder_hint))
         pl_info = PlaylistInfo(
             name=playlist.get("name", "playlist"),
             url=playlist.get("url", ""),

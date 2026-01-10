@@ -5,7 +5,7 @@ Settings management
 import json
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 import tkinter as tk
 from tkinter import filedialog
 
@@ -74,7 +74,31 @@ def load_settings() -> Dict[str, Any]:
                 playlists, playlists_changed = _dedupe_and_normalize_playlist_list(settings.get("playlists", []))
                 new_playlists, new_playlists_changed = _dedupe_and_normalize_playlist_list(settings.get("new_playlists", []))
 
+                # Ensure new playlists are actually syncable.
+                # Historically, newly-added entries were tracked in `new_playlists` but `main.py` only syncs `playlists`.
+                # Merge any missing entries into `playlists` while keeping `new_playlists` for bookkeeping.
+                merged = False
+                playlist_keys: set[str] = set()
+                for item in playlists:
+                    url_norm = normalize_url(str(item.get("url", "") or "")).strip()
+                    pid = str(item.get("playlist_id") or extract_playlist_id(url_norm) or "").strip()
+                    key = (pid or url_norm).strip().lower()
+                    if key:
+                        playlist_keys.add(key)
+
+                for item in new_playlists:
+                    url_norm = normalize_url(str(item.get("url", "") or "")).strip()
+                    pid = str(item.get("playlist_id") or extract_playlist_id(url_norm) or "").strip()
+                    key = (pid or url_norm).strip().lower()
+                    if key and key not in playlist_keys:
+                        playlists.append(item)
+                        playlist_keys.add(key)
+                        merged = True
+
                 if playlists_changed:
+                    settings["playlists"] = playlists
+                    changed = True
+                elif merged:
                     settings["playlists"] = playlists
                     changed = True
                 if new_playlists_changed:
@@ -146,19 +170,107 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
         if stored_id:
             existing_playlist_ids.add(stored_id)
 
-    existing_folder_names = set()
+    existing_folder_names: set[str] = set()
+    folder_display_map: Dict[str, str] = {}
     for pl in existing:
         name = pl.get("name", "")
-        if name:
-            existing_folder_names.add(sanitize_folder_name(name).lower())
+        folder_override = pl.get("folder")
+        if folder_override:
+            sanitized = sanitize_folder_name(folder_override)
+        else:
+            sanitized = sanitize_folder_name(name)
+        if sanitized:
+            key = sanitized.lower()
+            existing_folder_names.add(key)
+            folder_display_map.setdefault(key, folder_override or sanitized)
 
     try:
         if base_folder.exists():
             for child in base_folder.iterdir():
                 if child.is_dir():
-                    existing_folder_names.add(child.name.lower())
+                    sanitized = sanitize_folder_name(child.name)
+                    key = sanitized.lower()
+                    existing_folder_names.add(key)
+                    folder_display_map[key] = child.name
     except Exception:
         pass
+
+    def browse_existing_folder() -> Optional[Tuple[str, str]]:
+        """Let the user pick an existing folder via dialog.
+
+        Safety: only accept directories that are direct children of base_folder.
+        Returns: (folder_key, display_name) or None.
+        """
+        try:
+            if not base_folder.exists():
+                print(f"{Colors.YELLOW}Base folder does not exist yet: {base_folder}{Colors.RESET}")
+                return None
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            root.update_idletasks()
+            picked = filedialog.askdirectory(
+                title="Select an existing playlist folder (must be inside the base folder)",
+                initialdir=str(base_folder),
+            )
+            root.destroy()
+
+            if not picked:
+                return None
+            picked_path = Path(picked)
+            try:
+                picked_resolved = picked_path.resolve()
+                base_resolved = base_folder.resolve()
+            except Exception:
+                picked_resolved = picked_path
+                base_resolved = base_folder
+
+            if picked_resolved.parent != base_resolved:
+                print(
+                    f"{Colors.RED}Selected folder must be a direct child of {base_folder}.{Colors.RESET}\n"
+                )
+                return None
+
+            display = picked_resolved.name
+            sanitized = sanitize_folder_name(display)
+            return sanitized.lower(), display
+        except Exception as e:
+            print(f"{Colors.YELLOW}⚠ Folder picker failed: {e}{Colors.RESET}")
+            return None
+
+    def choose_existing_folder() -> Optional[Tuple[str, str]]:
+        if not folder_display_map:
+            print(f"{Colors.YELLOW}No existing folders detected in {base_folder}.{Colors.RESET}")
+            return None
+
+        options: List[Tuple[str, str]] = []
+        seen: set[str] = set()
+        for key, display in sorted(folder_display_map.items(), key=lambda item: item[1].lower()):
+            if key in seen:
+                continue
+            seen.add(key)
+            options.append((key, display))
+
+        if not options:
+            print(f"{Colors.YELLOW}No reusable folders available in {base_folder}.{Colors.RESET}")
+            return None
+
+        print(f"\n{Colors.BOLD}Select an existing folder to reuse:{Colors.RESET}")
+        for idx, (_, display) in enumerate(options, 1):
+            location = base_folder / display
+            status = "✓" if location.exists() else "⚠"
+            print(f" {idx:2}. {display} {Colors.GRAY}({status} {'exists' if status == '✓' else 'missing'}){Colors.RESET}")
+
+        while True:
+            choice = input(f"{Colors.BLUE}Enter number to reuse or press Enter to cancel: {Colors.RESET}").strip()
+            if not choice:
+                return None
+            if choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(options):
+                    return options[idx - 1]
+            print(f"{Colors.RED}Invalid selection. Try again.{Colors.RESET}")
     
     if existing:
         print(f"{Colors.YELLOW}Current playlists:{Colors.RESET}")
@@ -181,34 +293,91 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
             if not is_probably_url(url):
                 print(f"{Colors.RED}That doesn't look like a valid URL: '{url}'. Skipping.{Colors.RESET}\n")
                 continue
+
+            # Safety: require a real playlist URL. A single-video link (youtu.be/...) will scan as an empty playlist
+            # and the sync step can quarantine everything as "missing".
+            playlist_id = extract_playlist_id(url)
+            if not playlist_id:
+                print(
+                    f"{Colors.RED}That link is not a playlist (missing 'list='). Paste a YouTube playlist URL.{Colors.RESET}\n"
+                )
+                continue
             
             default_name = f"Playlist_{len(existing) + len(new_playlists) + 1}"
-            name = input(f" {Colors.BLUE}Folder name [{default_name}]: {Colors.RESET}").strip()
-            if not name:
-                name = default_name
 
-            playlist_id = extract_playlist_id(url)
-            sanitized_name = sanitize_folder_name(name)
+            sanitized_name: Optional[str] = None
+            folder_key = ""
+            folder_exists = False
+            selected_folder_display = ""
+
+            if folder_display_map:
+                reuse_prompt = input(
+                    f"{Colors.BLUE}Use an existing folder for this playlist? (y/N): {Colors.RESET}"
+                ).strip().lower()
+                if reuse_prompt in ("y", "yes"):
+                    chosen = choose_existing_folder()
+                    if chosen:
+                        folder_key, selected_folder_display = chosen
+                        sanitized_name = folder_display_map.get(folder_key, selected_folder_display)
+                        folder_exists = True
+                    else:
+                        print(f"{Colors.YELLOW}No folder selected. A new folder will be configured.{Colors.RESET}")
+
+            if not folder_exists:
+                browse_prompt = input(
+                    f"{Colors.BLUE}Browse to select an existing folder inside the base folder? (y/N): {Colors.RESET}"
+                ).strip().lower()
+                if browse_prompt in ("y", "yes"):
+                    picked = browse_existing_folder()
+                    if picked:
+                        folder_key, selected_folder_display = picked
+                        sanitized_name = selected_folder_display
+                        folder_exists = True
+                    else:
+                        print(f"{Colors.YELLOW}No folder selected. A new folder will be configured.{Colors.RESET}")
+
+            if not folder_exists:
+                folder_input = input(
+                    f" {Colors.BLUE}Folder name [{default_name}]: {Colors.RESET}"
+                ).strip()
+                if not folder_input:
+                    folder_input = default_name
+                sanitized_name = sanitize_folder_name(folder_input)
+                folder_key = sanitized_name.lower()
+
+                if folder_key in existing_folder_names:
+                    print(
+                        f"{Colors.RED}Folder '{sanitized_name}' already exists in {base_folder}. Choose another name or reuse an existing folder.{Colors.RESET}\n"
+                    )
+                    continue
+            else:
+                sanitized_name = sanitize_folder_name(sanitized_name or selected_folder_display)
+                folder_key = sanitized_name.lower()
+
+            if folder_exists:
+                name = selected_folder_display or sanitized_name or default_name
+            else:
+                display_default = sanitized_name or default_name
+                name = input(
+                    f" {Colors.BLUE}Playlist name [{display_default}]: {Colors.RESET}"
+                ).strip() or display_default
+
             name_key = name.strip().lower()
-            folder_key = sanitized_name.lower()
 
             if name_key and name_key in existing_name_keys:
                 print(f"{Colors.RED}Playlist name '{name}' already exists. Choose a different name.{Colors.RESET}\n")
-                continue
-
-            if folder_key in existing_folder_names:
-                print(
-                    f"{Colors.RED}Folder '{sanitized_name}' already exists in {base_folder}. Choose another name or remove the folder first.{Colors.RESET}\n"
-                )
                 continue
 
             if playlist_id and playlist_id in existing_playlist_ids:
                 print(f"{Colors.RED}Playlist ID '{playlist_id}' is already configured locally. Use a different playlist.{Colors.RESET}\n")
                 continue
             
+            folder_for_storage = selected_folder_display if folder_exists else sanitized_name
+
             new_playlist = {
                 "name": name.strip(),
                 "url": url,
+                "folder": folder_for_storage,
                 "is_new": True  # Mark as new
             }
             if playlist_id:
@@ -220,7 +389,9 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
             existing.append(new_playlist)
             if name_key:
                 existing_name_keys.add(name_key)
-            existing_folder_names.add(folder_key)
+            if sanitized_name is not None:
+                existing_folder_names.add(folder_key)
+                folder_display_map[folder_key] = folder_for_storage or sanitized_name
             if playlist_id:
                 existing_playlist_ids.add(playlist_id)
             
@@ -234,9 +405,23 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
                     removed_name = removed.get('name','(unnamed)')
                     print(f"{Colors.YELLOW}Removed '{removed_name}'{Colors.RESET}\n")
 
+                    # Keep new_playlists in sync as well.
+                    def _playlist_key(item: Dict[str, Any]) -> str:
+                        url_norm = normalize_url(str(item.get("url", "") or "")).strip()
+                        pid = str(item.get("playlist_id") or extract_playlist_id(url_norm) or "").strip()
+                        return (pid or url_norm).strip().lower()
+
+                    removed_key = _playlist_key(removed)
+                    if removed_key:
+                        settings["new_playlists"] = [
+                            item for item in settings.get("new_playlists", [])
+                            if isinstance(item, dict) and _playlist_key(item) != removed_key
+                        ]
+
                     # Offer to delete the playlist folder; default is to move it to a quarantine folder
                     base = Path(settings.get("download_path", Path.home() / "Music" / "YouTube Playlists"))
-                    playlist_folder = base / sanitize_folder_name(removed_name)
+                    folder_hint = removed.get("folder") or removed_name
+                    playlist_folder = base / sanitize_folder_name(str(folder_hint))
 
                     if playlist_folder.exists():
                         choice = input(f"{Colors.BLUE}Also remove the folder for '{removed_name}'? (Q)uarantine/(D)elete/(N)o [Q]: {Colors.RESET}").strip().lower()
