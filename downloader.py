@@ -72,6 +72,9 @@ class DownloadResult:
     """Aggregate result of a yt-dlp run"""
     success: bool
     failures: List[DownloadFailure]
+    downloaded: int = 0
+    skipped_archive: int = 0
+    skipped_existing: int = 0
 
 class DownloadError(Exception):
     """Custom exception for download errors"""
@@ -132,7 +135,7 @@ class YTDLPWrapper:
     ) -> DownloadResult:
         """Download multiple videos using yt-dlp and capture errors"""
         if not video_urls:
-            return DownloadResult(success=True, failures=[])
+            return DownloadResult(success=True, failures=[], downloaded=0, skipped_archive=0, skipped_existing=0)
             
         batch_file = output_dir / f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         log_file = None
@@ -199,7 +202,10 @@ class YTDLPWrapper:
             )
             
             # Process output for progress tracking
+            processed_count = 0
             downloaded_count = 0
+            skipped_archive = 0
+            skipped_existing = 0
             for line in process.stdout:
                 line = line.rstrip("\n")
                 if not line:
@@ -213,15 +219,23 @@ class YTDLPWrapper:
                     except Exception:
                         pass
 
-                # Check for download completion
-                if any(pattern in line for pattern in [
-                    "[download] 100%",
-                    "has already been downloaded",
-                    "has already been recorded"
-                ]):
-                    downloaded_count += 1
+                # Track outcomes and progress.
+                lower = line.lower()
+                if "has already been recorded in the archive" in lower:
+                    skipped_archive += 1
+                    processed_count += 1
                     if progress_callback:
-                        progress_callback(downloaded_count)
+                        progress_callback(processed_count)
+                elif "has already been downloaded" in lower:
+                    skipped_existing += 1
+                    processed_count += 1
+                    if progress_callback:
+                        progress_callback(processed_count)
+                elif "[download] 100%" in line:
+                    downloaded_count += 1
+                    processed_count += 1
+                    if progress_callback:
+                        progress_callback(processed_count)
                         
                 # Log errors
                 if "[error]" in line.lower():
@@ -258,7 +272,13 @@ class YTDLPWrapper:
                     except Exception:
                         pass
 
-            return DownloadResult(success=(process.returncode == 0), failures=failures)
+            return DownloadResult(
+                success=(process.returncode == 0),
+                failures=failures,
+                downloaded=downloaded_count,
+                skipped_archive=skipped_archive,
+                skipped_existing=skipped_existing,
+            )
             
         except Exception as e:
             logger.error(f"Download failed: {e}")
@@ -271,7 +291,7 @@ class YTDLPWrapper:
                     lf.close()
                 except Exception:
                     pass
-            return DownloadResult(success=False, failures=failures)
+            return DownloadResult(success=False, failures=failures, downloaded=0, skipped_archive=0, skipped_existing=0)
         finally:
             # Clean up batch file unless debugging (keep for inspection)
             try:
@@ -387,33 +407,72 @@ class PlaylistSyncer:
             logger.error(f"Failed {operation_name} after {elapsed:.2f}s: {e}")
             raise
     
-    def get_existing_video_ids(self) -> Set[str]:
-        """Get all existing video IDs from archive and filenames"""
-        existing_ids = set()
-        
-        # From archive file
-        if self.archive_file.exists():
-            try:
-                with open(self.archive_file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        
-                        # Try multiple patterns to extract video ID
-                        video_id = self.file_processor.extract_video_id(line)
-                        if video_id:
-                            existing_ids.add(video_id)
-            except Exception as e:
-                logger.warning(f"Failed to read archive file: {e}")
-        
-        # From existing filenames
+    def _get_existing_file_video_ids(self) -> Set[str]:
+        """Video IDs present on disk (filenames)."""
+        file_ids: Set[str] = set()
         for file in self.file_processor.get_audio_files(self.playlist.folder):
             video_id = self.file_processor.extract_video_id(file.name)
             if video_id:
-                existing_ids.add(video_id)
-        
-        return existing_ids
+                file_ids.add(video_id)
+        return file_ids
+
+    def _get_archive_video_ids(self) -> Set[str]:
+        """Video IDs recorded in yt-dlp's download archive (downloaded.txt)."""
+        archive_ids: Set[str] = set()
+        if not self.archive_file.exists():
+            return archive_ids
+
+        try:
+            with open(self.archive_file, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line:
+                        continue
+
+                    # Typical format is: "extractor video_id" (e.g. "youtube dQw4w9WgXcQ")
+                    parts = line.split()
+                    if len(parts) >= 2 and re.fullmatch(r"[A-Za-z0-9_-]{11}", parts[1]):
+                        archive_ids.add(parts[1])
+                        continue
+
+                    # Fallback: search any 11-char token.
+                    match = re.search(r"\b([A-Za-z0-9_-]{11})\b", line)
+                    if match:
+                        archive_ids.add(match.group(1))
+        except Exception as e:
+            logger.warning(f"Failed to read archive file: {e}")
+
+        return archive_ids
+
+    def _prune_archive_ids(self, video_ids: Set[str]) -> int:
+        """Remove IDs from download archive so yt-dlp can fetch them again."""
+        if not video_ids or not self.archive_file.exists():
+            return 0
+
+        try:
+            with open(self.archive_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            kept: List[str] = []
+            removed = 0
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    kept.append(line)
+                    continue
+
+                if any(video_id in stripped for video_id in video_ids):
+                    removed += 1
+                    continue
+                kept.append(line)
+
+            if removed:
+                with open(self.archive_file, "w", encoding="utf-8") as f:
+                    f.writelines(kept)
+            return removed
+        except Exception as e:
+            logger.warning(f"Failed to prune archive IDs: {e}")
+            return 0
     
     def get_existing_song_names(self) -> Set[str]:
         """Get normalized song names from existing files"""
@@ -522,18 +581,29 @@ class PlaylistSyncer:
             return []
         
         with self.operation_context("duplicate check"):
-            existing_ids = self.get_existing_video_ids()
+            file_ids = self._get_existing_file_video_ids()
+            archive_ids = self._get_archive_video_ids()
             existing_songs = self.get_existing_song_names()
-            
-            print(f"{Colors.GRAY}✓ Already have {len(existing_ids)} songs by video ID{Colors.RESET}")
+
+            print(f"{Colors.GRAY}✓ Already have {len(file_ids)} songs on disk by video ID{Colors.RESET}")
+            if archive_ids:
+                print(f"{Colors.GRAY}✓ Archive has {len(archive_ids)} recorded IDs (downloaded.txt){Colors.RESET}")
             print(f"{Colors.GRAY}✓ Already have {len(existing_songs)} unique songs by name{Colors.RESET}")
             
             new_videos = []
             duplicate_count = 0
+            restore_from_archive = 0
             
             for video in all_videos:
                 # Check by video ID
-                if video.id in existing_ids:
+                if video.id in file_ids:
+                    continue
+
+                # If it was recorded in the archive but the file is missing locally,
+                # treat it as missing and download it again.
+                if video.id in archive_ids:
+                    restore_from_archive += 1
+                    new_videos.append(video)
                     continue
                 
                 # Check by song name
@@ -549,6 +619,11 @@ class PlaylistSyncer:
             
             if duplicate_count > 0:
                 print(f"{Colors.YELLOW}⚠ Found {duplicate_count} songs already downloaded{Colors.RESET}")
+
+            if restore_from_archive > 0:
+                print(
+                    f"{Colors.YELLOW}⚠ {restore_from_archive} track(s) are recorded in downloaded.txt but missing locally; will re-download them{Colors.RESET}"
+                )
             
             return new_videos
     
@@ -575,6 +650,15 @@ class PlaylistSyncer:
             else:
                 log_path = None
 
+            # If IDs are in yt-dlp's archive but missing locally, yt-dlp will skip them.
+            # Prune the target IDs so yt-dlp can re-download.
+            target_ids = {v.id for v in videos if v.id}
+            pruned = self._prune_archive_ids(target_ids)
+            if pruned:
+                print(
+                    f"{Colors.YELLOW}⚠ Removed {pruned} stale ID(s) from downloaded.txt so yt-dlp can re-download missing files{Colors.RESET}"
+                )
+
             result = self.ytdlp.download_videos(
                 video_urls=video_urls,
                 output_dir=self.playlist.folder,
@@ -586,7 +670,15 @@ class PlaylistSyncer:
             success = result.success
             
             if success:
-                progress_bar.complete(f"✓ Downloaded {len(videos)}/{len(videos)}")
+                details: List[str] = []
+                if result.downloaded:
+                    details.append(f"downloaded {result.downloaded}")
+                if result.skipped_existing:
+                    details.append(f"already present {result.skipped_existing}")
+                if result.skipped_archive:
+                    details.append(f"skipped archive {result.skipped_archive}")
+                suffix = f" ({', '.join(details)})" if details else ""
+                progress_bar.complete(f"✓ Processed {len(videos)}/{len(videos)}{suffix}")
             else:
                 progress_bar.complete(f"⚠ Download issues occurred")
 
