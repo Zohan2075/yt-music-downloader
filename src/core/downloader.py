@@ -18,10 +18,10 @@ from enum import Enum
 import logging
 import sys
 
-from colors import Colors
-from progress import ProgressBar
-from metadata import MetadataManager, FileNameFormatter
-from utils import (
+from src.ui.colors import Colors
+from src.core.progress import ProgressBar
+from src.core.metadata import MetadataManager, FileNameFormatter
+from src.core.utils import (
     COOKIES_FILE,
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -406,18 +406,22 @@ class PlaylistSyncer:
             elapsed = time.time() - start_time
             logger.error(f"Failed {operation_name} after {elapsed:.2f}s: {e}")
             raise
-    
-    def _get_existing_file_video_ids(self) -> Set[str]:
+
+    def get_disk_video_ids(self) -> Set[str]:
         """Video IDs present on disk (filenames)."""
-        file_ids: Set[str] = set()
+        disk_ids: Set[str] = set()
         for file in self.file_processor.get_audio_files(self.playlist.folder):
             video_id = self.file_processor.extract_video_id(file.name)
             if video_id:
-                file_ids.add(video_id)
-        return file_ids
+                disk_ids.add(video_id)
+        return disk_ids
 
-    def _get_archive_video_ids(self) -> Set[str]:
-        """Video IDs recorded in yt-dlp's download archive (downloaded.txt)."""
+    def get_archive_video_ids(self) -> Set[str]:
+        """Video IDs recorded in yt-dlp's download archive (downloaded.txt).
+
+        Archive format is typically: "extractor video_id" (e.g. "youtube dQw4w9WgXcQ"),
+        so we need to parse that explicitly.
+        """
         archive_ids: Set[str] = set()
         if not self.archive_file.exists():
             return archive_ids
@@ -429,13 +433,11 @@ class PlaylistSyncer:
                     if not line:
                         continue
 
-                    # Typical format is: "extractor video_id" (e.g. "youtube dQw4w9WgXcQ")
                     parts = line.split()
                     if len(parts) >= 2 and re.fullmatch(r"[A-Za-z0-9_-]{11}", parts[1]):
                         archive_ids.add(parts[1])
                         continue
 
-                    # Fallback: search any 11-char token.
                     match = re.search(r"\b([A-Za-z0-9_-]{11})\b", line)
                     if match:
                         archive_ids.add(match.group(1))
@@ -444,9 +446,13 @@ class PlaylistSyncer:
 
         return archive_ids
 
-    def _prune_archive_ids(self, video_ids: Set[str]) -> int:
-        """Remove IDs from download archive so yt-dlp can fetch them again."""
-        if not video_ids or not self.archive_file.exists():
+    def _prune_archive_for_videos(self, videos: List[VideoInfo]) -> int:
+        """Remove archive entries for the given video IDs so yt-dlp will re-download them."""
+        if not videos or not self.archive_file.exists():
+            return 0
+
+        ids_to_prune = {v.id for v in videos if v.id}
+        if not ids_to_prune:
             return 0
 
         try:
@@ -461,7 +467,7 @@ class PlaylistSyncer:
                     kept.append(line)
                     continue
 
-                if any(video_id in stripped for video_id in video_ids):
+                if any(video_id in stripped for video_id in ids_to_prune):
                     removed += 1
                     continue
                 kept.append(line)
@@ -471,7 +477,7 @@ class PlaylistSyncer:
                     f.writelines(kept)
             return removed
         except Exception as e:
-            logger.warning(f"Failed to prune archive IDs: {e}")
+            logger.warning(f"Failed to prune archive file: {e}")
             return 0
     
     def get_existing_song_names(self) -> Set[str]:
@@ -581,13 +587,16 @@ class PlaylistSyncer:
             return []
         
         with self.operation_context("duplicate check"):
-            file_ids = self._get_existing_file_video_ids()
-            archive_ids = self._get_archive_video_ids()
+            disk_ids = self.get_disk_video_ids()
+            archive_ids = self.get_archive_video_ids()
             existing_songs = self.get_existing_song_names()
-
-            print(f"{Colors.GRAY}✓ Already have {len(file_ids)} songs on disk by video ID{Colors.RESET}")
-            if archive_ids:
-                print(f"{Colors.GRAY}✓ Archive has {len(archive_ids)} recorded IDs (downloaded.txt){Colors.RESET}")
+            
+            print(f"{Colors.GRAY}✓ Already have {len(disk_ids)} songs on disk by video ID{Colors.RESET}")
+            stale_only = len(archive_ids - disk_ids)
+            if stale_only:
+                print(
+                    f"{Colors.YELLOW}⚠ Archive contains {stale_only} ID(s) not found on disk (will re-download if needed){Colors.RESET}"
+                )
             print(f"{Colors.GRAY}✓ Already have {len(existing_songs)} unique songs by name{Colors.RESET}")
             
             new_videos = []
@@ -596,15 +605,12 @@ class PlaylistSyncer:
             
             for video in all_videos:
                 # Check by video ID
-                if video.id in file_ids:
+                if video.id in disk_ids:
                     continue
 
                 # If it was recorded in the archive but the file is missing locally,
-                # treat it as missing and download it again.
-                if video.id in archive_ids:
-                    restore_from_archive += 1
-                    new_videos.append(video)
-                    continue
+                # treat it as missing and allow re-download.
+                is_archive_only = bool(video.id in archive_ids)
                 
                 # Check by song name
                 clean_name = FileNameFormatter.format_filename(video.metadata)
@@ -614,7 +620,10 @@ class PlaylistSyncer:
                     print(f"{Colors.YELLOW}⚠ Already have song (different video): {clean_name}{Colors.RESET}")
                     duplicate_count += 1
                     continue
-                
+
+                if is_archive_only:
+                    restore_from_archive += 1
+
                 new_videos.append(video)
             
             if duplicate_count > 0:
@@ -634,6 +643,12 @@ class PlaylistSyncer:
         
         with self.operation_context("download"):
             print(f"\n{Colors.MAGENTA}⬇ Downloading {len(videos)} new song(s)...{Colors.RESET}")
+
+            pruned = self._prune_archive_for_videos(videos)
+            if pruned:
+                print(
+                    f"{Colors.YELLOW}⚠ Pruned {pruned} stale archive entry/entries so missing files can be re-downloaded{Colors.RESET}"
+                )
             
             video_urls = [video.url for video in videos]
             progress_bar = ProgressBar(total=len(videos), title="Downloading")

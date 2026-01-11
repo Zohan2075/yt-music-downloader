@@ -1,5 +1,5 @@
 from yt_dlp import YoutubeDL
-from settings import load_settings
+from src.core.settings import load_settings
 
 settings = load_settings()
 pl = next((p for p in settings.get('playlists', []) if p.get('name','').lower()=='breakcore'), None)

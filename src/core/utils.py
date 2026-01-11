@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from typing import Optional, List
 
-from colors import Colors
+from src.ui.colors import Colors
 
 # Shared extension catalogs
 AUDIO_EXTENSIONS = {'.mp3', '.m4a', '.webm', '.opus', '.flac', '.wav', '.ogg'}

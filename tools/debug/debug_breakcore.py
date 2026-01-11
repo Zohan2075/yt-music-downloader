@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
-from settings import load_settings
-from downloader import PlaylistInfo, PlaylistSyncer, SyncMode
+from src.core.settings import load_settings
+from src.core.downloader import PlaylistInfo, PlaylistSyncer, SyncMode
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('debug')
