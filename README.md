@@ -4,32 +4,32 @@ Terminal-first playlist synchroniser that mirrors YouTube and YouTube Music play
 
 ---
 
-## Highlights (Non‑Expert Friendly)
+## ✨ Highlights
 
 This tool helps you keep your local music folders in sync with your YouTube / YouTube Music playlists.
 
 What it does for you:
 
-- Downloads new songs from your playlists into a folder you choose.
-- Keeps your files tidy by renaming new downloads into a consistent format.
-- Skips songs you already have on disk (so rerunning sync is fast).
-- If a song disappears from the online playlist, it does **not** instantly delete it — it moves it to a `quarantine/` folder inside that playlist so you can review.
-- Writes logs so you can see what happened if something fails.
+- ⬇️ Downloads new songs from your playlists into a folder you choose.
+- 🧹 Keeps your files tidy by renaming new downloads into a consistent format.
+- ⚡ Skips songs you already have on disk (so rerunning sync is fast).
+- 🧪 If a song disappears from the online playlist, it does **not** instantly delete it — it moves it to a `quarantine/` folder inside that playlist so you can review.
+- 🧾 Writes logs so you can see what happened if something fails.
 
 Menu options (plain English):
 
-- Option 1 (Sync): “Update my playlist folders to match YouTube”.
-- Option 2 (Manage): “Pick where playlists are stored, add/remove playlists, or register existing folders”.
-- Option 3 (Single download): “Download one link into a folder”.
+- 🔄 Option 1 (Sync): “Update my playlist folders to match YouTube”.
+- 🗂️ Option 2 (Manage): “Pick where playlists are stored, add/remove playlists, or register existing folders”.
+- 🎵 Option 3 (Single download): “Download one link into a folder”.
 
 Safety basics:
 
-- If the playlist scan returns **zero** items (for example: wrong URL, blocked request, cookies needed), sync aborts and will **not** quarantine/remove anything.
-- If something is listed as downloaded in `downloaded.txt` but the file is missing locally, the tool can re-download it automatically.
+- 🛑 If the playlist scan returns **zero** items (for example: wrong URL, blocked request, cookies needed), sync aborts and will **not** quarantine/remove anything.
+- 🧩 If something is listed as downloaded in `downloaded.txt` but the file is missing locally, the tool can re-download it automatically.
 
 ---
 
-## Requirements
+## ✅ Requirements
 
 - Python 3.9 or newer (the repo currently uses a `.venv` on Windows).
 - yt-dlp available either as the Python package (`pip install yt-dlp`) or the standalone binary in PATH.
@@ -39,7 +39,7 @@ Safety basics:
 
 ---
 
-## Installation & Setup
+## 🧰 Installation & Setup
 
 1. Ensure Python, yt-dlp, and FFmpeg are installed and reachable from the command line.
 2. (Optional) Create and activate a virtual environment.
@@ -53,7 +53,7 @@ The first run will create settings.json, metadata_cache.json, and other artefact
 
 ---
 
-## Running The Tool
+## ▶️ Running The Tool
 
 Execute the entry point from the repository root:
 
@@ -86,7 +86,7 @@ Press ESC at most prompts to back out safely.
 
 ---
 
-## Configuration Model
+## ⚙️ Configuration Model
 
 - settings.json holds the global download directory and playlist list. Each playlist tracks a display name, URL, derived playlist ID, and an optional `folder` name (subfolder under the base folder).
 - downloaded.txt in each playlist folder is a yt-dlp archive that prevents redownloading the same video ID. The tool can automatically recover from stale archive entries if files are missing locally.
@@ -99,7 +99,7 @@ All files are JSON and safe to edit manually if needed; the tool will normalise 
 
 ---
 
-## Sync Pipeline Details
+## 🔁 Sync Pipeline Details
 
 - Fetch playlist metadata using yt-dlp with retry logic and optional per-run verbose logging.
 - Compare remote video IDs with what is actually on disk (filename heuristics) and download missing entries.
@@ -113,13 +113,13 @@ Safety notes:
 
 ---
 
-## Single Download Mode
+## 🎧 Single Download Mode
 
 The standalone downloader accepts any non-playlist YouTube/YouTube Music URL, offers a destination picker, and streams progress via the animated status bar. When the Python module variant of yt-dlp is available it keeps everything in-process; otherwise it falls back to the CLI but still parses progress into the same UI.
 
 ---
 
-## Debugging & Maintenance
+## 🛠️ Debugging & Maintenance
 
 - Enable debug logging when prompted during sync to keep per-playlist yt-dlp command transcripts and batch files for audit.
 - Inspect yt-dlp-logs/ for per-playlist download logs.
@@ -129,7 +129,7 @@ The standalone downloader accepts any non-playlist YouTube/YouTube Music URL, of
 
 ---
 
-## Project Layout
+## 🧱 Project Layout
 
 - main.py is the entry point.
 - src/core contains the downloader, settings manager, metadata handling, progress UI, and utilities.
