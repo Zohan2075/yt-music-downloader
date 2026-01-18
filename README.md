@@ -1,6 +1,6 @@
 # YouTube Playlist Manager
 
-Terminal-first playlist synchroniser that mirrors YouTube and YouTube Music playlists into a local audio library. The tool emphasises safety: it only downloads what is missing, renames files consistently, quarantines removals, and keeps verbose audit logs for every action.
+Terminal-first playlist synchroniser that mirrors YouTube and YouTube Music playlists into a local audio library you control. With safety: it only downloads what is missing, renames files consistently, quarantines removals, and keeps verbose audit logs for every action.
 
 ---
 
@@ -16,7 +16,7 @@ What it does for you:
 - 🧪 If a song disappears from the online playlist, it does **not** instantly delete it — it moves it to a `quarantine/` folder inside that playlist so you can review.
 - 🧾 Writes logs so you can see what happened if something fails.
 
-Menu options (plain English):
+Menu options:
 
 - 🔄 Option 1 (Sync): “Update my playlist folders to match YouTube”.
 - 🗂️ Option 2 (Manage): “Pick where playlists are stored, add/remove playlists, or register existing folders”.
@@ -26,6 +26,23 @@ Safety basics:
 
 - 🛑 If the playlist scan returns **zero** items (for example: wrong URL, blocked request, cookies needed), sync aborts and will **not** quarantine/remove anything.
 - 🧩 If something is listed as downloaded in `downloaded.txt` but the file is missing locally, the tool can re-download it automatically.
+
+---
+
+## ✅ Intended Use (Rights / Permission)
+
+This project is designed for managing downloads of content you are authorised to download — for example:
+
+- Your own uploads (your own channel / playlists of your uploads)
+- Content with explicit permission from the rights holder
+- Content under permissive licences (for example Creative Commons, where applicable)
+
+It is not intended to be a general-purpose “download any song from YouTube” tool.
+
+Notes:
+
+- YouTube’s Terms of Service and copyright law are separate concerns.
+- Downloading copyrighted music you don’t have rights/permission for may be illegal and/or a ToS violation depending on your jurisdiction.
 
 ---
 

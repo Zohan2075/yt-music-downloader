@@ -479,6 +479,51 @@ class PlaylistSyncer:
         except Exception as e:
             logger.warning(f"Failed to prune archive file: {e}")
             return 0
+
+    def _prune_archive_ids(self, video_ids: Set[str]) -> int:
+        """Remove archive entries for the given video IDs so yt-dlp will re-download them.
+
+        This is used when an ID is recorded in downloaded.txt but the media file is missing locally.
+        """
+        if not video_ids or not self.archive_file.exists():
+            return 0
+
+        ids_to_prune = {vid.strip() for vid in video_ids if isinstance(vid, str) and vid.strip()}
+        if not ids_to_prune:
+            return 0
+
+        try:
+            with open(self.archive_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            kept: List[str] = []
+            removed = 0
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    kept.append(line)
+                    continue
+
+                # Typical format: "extractor video_id"
+                parts = stripped.split()
+                if len(parts) >= 2 and parts[1] in ids_to_prune:
+                    removed += 1
+                    continue
+
+                # Fallback: prune if any ID token appears in the line
+                if any(re.search(rf"\b{re.escape(vid)}\b", stripped) for vid in ids_to_prune):
+                    removed += 1
+                    continue
+
+                kept.append(line)
+
+            if removed:
+                with open(self.archive_file, "w", encoding="utf-8") as f:
+                    f.writelines(kept)
+            return removed
+        except Exception as e:
+            logger.warning(f"Failed to prune archive file: {e}")
+            return 0
     
     def get_existing_song_names(self) -> Set[str]:
         """Get normalized song names from existing files"""
