@@ -4,6 +4,7 @@ Settings management
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 import tkinter as tk
@@ -157,6 +158,42 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
         print(f"{Colors.GREEN}✓ New folder: {new_path}{Colors.RESET}\n")
         current = new_path
     base_folder = Path(settings.get("download_path", DEFAULT_SETTINGS["download_path"]))
+    try:
+        base_folder.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    def _fetch_playlist_title(url: str, timeout: int = 20) -> Optional[str]:
+        """Best-effort fetch of the playlist title via yt-dlp.
+
+        This keeps Option 2 self-contained and avoids importing downloader modules.
+        """
+        try:
+            cmd = [
+                "yt-dlp",
+                "--flat-playlist",
+                "--skip-download",
+                "--dump-single-json",
+                url,
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            if result.returncode != 0:
+                return None
+
+            data = json.loads(result.stdout or "{}")
+            title = data.get("title") or data.get("playlist_title")
+            if not title:
+                return None
+            name = str(title).strip()
+            return name or None
+        except Exception:
+            return None
 
     def _pick_playlist_folder(base_dir: Path) -> Optional[Path]:
         """Pick (or create) a playlist folder. Returns None if user cancels."""
@@ -280,40 +317,72 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
                 )
                 continue
 
-            print(f" {Colors.YELLOW}Select the folder where this playlist's music will be stored.{Colors.RESET}")
-            chosen_folder = _pick_playlist_folder(base_folder)
-            if not chosen_folder:
-                print(f"{Colors.YELLOW}Cancelled folder selection. Skipping.{Colors.RESET}\n")
-                continue
-
-            if not _is_within_base(base_folder, chosen_folder):
+            # Prevent duplicates by playlist ID before creating any folders.
+            if playlist_id in existing_playlist_ids:
                 print(
-                    f"{Colors.RED}Selected folder must be inside the base folder:{Colors.RESET} {base_folder}"
-                )
-                print(f"{Colors.YELLOW}Tip: pick/create a subfolder inside that base folder.{Colors.RESET}\n")
-                continue
-
-            folder_key = chosen_folder.name.strip().lower()
-            if folder_key in existing_folder_keys:
-                print(
-                    f"{Colors.RED}That folder is already registered to a playlist in settings. Choose a different folder.{Colors.RESET}\n"
+                    f"{Colors.RED}That playlist is already configured locally (same playlist ID).{Colors.RESET}\n"
                 )
                 continue
 
-            name = _unique_name(chosen_folder.name, existing_name_keys)
+            # Fetch the real playlist name and use it as the folder name.
+            playlist_title = _fetch_playlist_title(url)
+            if not playlist_title:
+                print(
+                    f"{Colors.YELLOW}⚠ Could not fetch the playlist title via yt-dlp.{Colors.RESET}"
+                )
+                playlist_title = input(
+                    f" {Colors.BLUE}Enter a name for this playlist (recommended to match YouTube): {Colors.RESET}"
+                ).strip() or "playlist"
+            else:
+                print(f" {Colors.GRAY}Detected playlist title: {playlist_title}{Colors.RESET}")
+
+            name = _unique_name(playlist_title, existing_name_keys)
             name_key = name.strip().lower()
 
-            # name is generated unique above; no prompt needed
-            if playlist_id and playlist_id in existing_playlist_ids:
-                print(
-                    f"{Colors.RED}Playlist ID '{playlist_id}' is already configured locally. Use a different playlist.{Colors.RESET}\n"
-                )
-                continue
+            folder_base = sanitize_folder_name(playlist_title)
+            folder_name = folder_base
+            folder_path = base_folder / folder_name
+
+            # If a folder already exists with the exact playlist title, reuse it if it's not registered.
+            if folder_path.exists() and folder_path.is_dir() and folder_name.strip().lower() not in existing_folder_keys:
+                print(f" {Colors.GRAY}Using existing folder: {folder_path}{Colors.RESET}")
+            else:
+                # Otherwise, choose a unique folder name.
+                suffix = 2
+                while True:
+                    key = folder_name.strip().lower()
+                    candidate = base_folder / folder_name
+
+                    # Block if name is already registered to another playlist.
+                    if key in existing_folder_keys:
+                        pass
+                    # Block if a non-folder exists at that path.
+                    elif candidate.exists() and not candidate.is_dir():
+                        pass
+                    # Block if a folder exists but is already registered.
+                    elif candidate.exists() and candidate.is_dir() and key in existing_folder_keys:
+                        pass
+                    else:
+                        folder_path = candidate
+                        break
+
+                    folder_name = f"{folder_base}_{suffix}"
+                    suffix += 1
+
+                try:
+                    folder_path.mkdir(parents=True, exist_ok=True)
+                    if folder_path.exists():
+                        print(f" {Colors.GRAY}Folder ready: {folder_path}{Colors.RESET}")
+                except Exception as e:
+                    print(f"{Colors.RED}Failed to create folder '{folder_name}': {e}{Colors.RESET}\n")
+                    continue
+
+            folder_key = folder_name.strip().lower()
             
             new_playlist = {
                 "name": name.strip(),
                 "url": url,
-                "folder": chosen_folder.name,
+                "folder": folder_name,
                 "is_new": True  # Mark as new
             }
             if playlist_id:
