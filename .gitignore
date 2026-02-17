@@ -7,3 +7,6 @@ settings.json
 *.pyc
 youtube_autosync/
 *.code-workspace
+.venv/
+run.bat
+lunch.json

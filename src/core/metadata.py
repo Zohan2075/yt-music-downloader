@@ -15,7 +15,8 @@ class MetadataManager:
     """Manages metadata extraction and caching"""
     
     def __init__(self):
-        self.cache_file = Path(METADATA_CACHE_FILE)
+        project_root = Path(__file__).resolve().parents[2]
+        self.cache_file = project_root / METADATA_CACHE_FILE
         self.cache = self._load_cache()
 
     def _load_cache(self) -> Dict[str, Dict[str, str]]:

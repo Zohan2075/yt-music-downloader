@@ -19,7 +19,7 @@ from src.core.utils import (
 )
 from src.ui.colors import Colors
 
-SETTINGS_FILE = "settings.json"
+SETTINGS_FILE = Path(__file__).resolve().parents[2] / "settings.json"
 
 DEFAULT_SETTINGS = {
     "download_path": str(Path.home() / "Music" / "YouTube Playlists"),
@@ -31,7 +31,7 @@ DEFAULT_SETTINGS = {
 
 def load_settings() -> Dict[str, Any]:
     """Load settings from file"""
-    if os.path.exists(SETTINGS_FILE):
+    if SETTINGS_FILE.exists():
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 settings = json.load(f)

@@ -2,23 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "C/C++ Runner: Debug Session",
-      "type": "cppdbg",
+      "name": "Run main.py",
+      "type": "python",
       "request": "launch",
-      "args": [],
-      "stopAtEntry": false,
-      "externalConsole": true,
-      "cwd": "d:/Programming/code/Projects/Dark-Mode/src",
-      "program": "d:/Programming/code/Projects/Dark-Mode/src/build/Debug/outDebug",
-      "MIMode": "gdb",
-      "miDebuggerPath": "gdb",
-      "setupCommands": [
-        {
-          "description": "Enable pretty-printing for gdb",
-          "text": "-enable-pretty-printing",
-          "ignoreFailures": true
-        }
-      ]
+      "program": "${workspaceFolder}/main.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
     }
   ]
 }

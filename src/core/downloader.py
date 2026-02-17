@@ -1,5 +1,5 @@
 """
-Enhanced YouTube Playlist Downloader Module
+YouTube Playlist Downloader Module
 """
 
 import json
@@ -703,7 +703,7 @@ class PlaylistSyncer:
             
             if debug:
                 print(f"{Colors.YELLOW}Debug download enabled: yt-dlp logs and batch files will be kept in {self.playlist.folder}{Colors.RESET}")
-                log_dir = Path("yt-dlp-logs")
+                log_dir = self.playlist.folder / "yt-dlp-logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
                 log_path = log_dir / f"{sanitize_folder_name(self.playlist.name)}.log"
                 print(f"{Colors.GRAY}➡ yt-dlp log: {log_path.resolve()}{Colors.RESET}")
