@@ -78,6 +78,21 @@ Execute the entry point from the repository root:
 python main.py
 ```
 
+### Windows click-to-run
+
+You can also launch by double-clicking `main.py` and choosing `python.exe`.
+
+- The app now defaults the menu prompt to `X` on empty input, preventing accidental re-running of option 1.
+- When launched directly from Explorer (outside VS Code/Windows Terminal), it shows a final `Press Enter to close...` prompt so errors/output remain visible.
+
+### Recommended one-click launcher (Windows)
+
+Use `run_venv_python.bat` for the most reliable experience.
+
+- It always runs with `.venv\Scripts\python.exe`.
+- It avoids Windows "Open with" interpreter mismatches.
+- It keeps the window open (`pause`) so you can read errors/output.
+
 On Windows with the checked-in virtual environment, you can run:
 
 ```powershell

@@ -32,6 +32,166 @@ from src.flows.sync_flow import run_sync_mode as run_sync_mode_flow
 from src.flows.single_flow import run_single_download_mode
 
 ESCAPE_SENTINEL = "__SAFE_INPUT_ESC__"
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def should_pause_before_exit() -> bool:
+    """Best-effort detection for Windows click-launch sessions.
+
+    We avoid pausing inside common developer terminals (VS Code / Windows Terminal)
+    while keeping the window open when launched directly via file association.
+    """
+    if os.name != "nt":
+        return False
+
+    if os.environ.get("TERM_PROGRAM", "").lower() == "vscode":
+        return False
+
+    if os.environ.get("WT_SESSION"):
+        return False
+
+    if os.environ.get("YPM_NO_PAUSE", "").lower() in {"1", "true", "yes"}:
+        return False
+
+    return True
+
+
+def pause_before_exit() -> None:
+    """Pause at process end in click-launch scenarios so output stays visible."""
+    if not should_pause_before_exit():
+        return
+
+    try:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            input("\nPress Enter to close this window...")
+            return
+    except EOFError:
+        pass
+
+    # Fallback for non-interactive console sessions.
+    try:
+        os.system("pause")
+    except Exception:
+        pass
+
+
+def _ensure_console_python() -> bool:
+    """If started with pythonw.exe, relaunch with python.exe in a console."""
+    if os.name != "nt":
+        return False
+
+    exe = Path(sys.executable)
+    if exe.name.lower() != "pythonw.exe":
+        return False
+
+    console_python = exe.with_name("python.exe")
+    if not console_python.exists():
+        return False
+
+    script = str((PROJECT_ROOT / "main.py").resolve())
+    try:
+        creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        subprocess.Popen([str(console_python), script], creationflags=creation_flags)
+        return True
+    except Exception:
+        return False
+
+
+def _read_run_system_python_exe() -> str:
+    """Best-effort parse of run_system_python.bat to discover preferred interpreter."""
+    bat = PROJECT_ROOT / "run_system_python.bat"
+    if not bat.exists():
+        return ""
+
+    try:
+        content = bat.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("REM"):
+            continue
+        match = re.match(r'^"([^"]+python\.exe)"\s+main\.py\s*$', stripped, re.IGNORECASE)
+        if match:
+            candidate = match.group(1)
+            if Path(candidate).exists():
+                return candidate
+
+    return ""
+
+
+def _resolve_preferred_python() -> str:
+    """Resolve preferred interpreter path for this project (if available)."""
+    env_override = os.environ.get("YPM_PYTHON_EXE", "").strip().strip('"')
+    if env_override and Path(env_override).exists():
+        return env_override
+
+    venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
+
+    bat_python = _read_run_system_python_exe()
+    if bat_python:
+        return bat_python
+
+    return sys.executable
+
+
+def _relaunch_with_python(python_exe: str) -> bool:
+    """Launch selected Python interpreter in a new process.
+
+    Using a spawned process is more reliable than in-process exec replacement
+    in click-launch Windows sessions.
+    """
+    try:
+        script = str((PROJECT_ROOT / "main.py").resolve())
+        creation_flags = 0
+        if os.name == "nt":
+            creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        subprocess.Popen([python_exe, script], creationflags=creation_flags)
+        return True
+    except Exception as exc:
+        print(f"{Colors.RED}❌ Could not relaunch with selected Python: {exc}{Colors.RESET}")
+        return False
+
+
+def _pip_install_yt_dlp(python_exe: str) -> bool:
+    """Install yt-dlp into the current interpreter environment."""
+    install_cmd = [python_exe, "-m", "pip", "install", "yt-dlp"]
+
+    # Avoid requiring admin rights when not in a virtual environment.
+    in_venv = getattr(sys, "base_prefix", sys.prefix) != sys.prefix
+    if not in_venv:
+        install_cmd.append("--user")
+
+    try:
+        print(f"{Colors.BLUE}Attempting to install yt-dlp using:{Colors.RESET}")
+        print(f"  {Colors.GRAY}{' '.join(install_cmd)}{Colors.RESET}")
+        result = subprocess.run(install_cmd, capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            print(f"{Colors.GREEN}✓ yt-dlp installed successfully for this Python interpreter.{Colors.RESET}")
+            return True
+
+        # Try bootstrapping pip once, then retry install.
+        ensurepip_cmd = [python_exe, "-m", "ensurepip", "--upgrade"]
+        ensurepip_result = subprocess.run(ensurepip_cmd, capture_output=True, text=True, check=False)
+        if ensurepip_result.returncode == 0:
+            retry = subprocess.run(install_cmd, capture_output=True, text=True, check=False)
+            if retry.returncode == 0:
+                print(f"{Colors.GREEN}✓ yt-dlp installed successfully after bootstrapping pip.{Colors.RESET}")
+                return True
+            result = retry
+
+        print(f"{Colors.RED}❌ Automatic install failed (exit code {result.returncode}).{Colors.RESET}")
+        if result.stdout.strip():
+            print(f"{Colors.YELLOW}Installer output:{Colors.RESET}\n{result.stdout.strip()}")
+        if result.stderr.strip():
+            print(f"{Colors.RED}Installer errors:{Colors.RESET}\n{result.stderr.strip()}")
+        return False
+    except Exception as exc:
+        print(f"{Colors.RED}❌ Failed to run installer: {exc}{Colors.RESET}")
+        return False
 
 
 def safe_input(prompt: str, default: str = "", allow_escape: bool = False) -> str:
@@ -403,6 +563,9 @@ def run_sync_mode(settings: Dict[str, Any]) -> None:
 
 def main() -> None:
     """Main orchestrator function"""
+    if _ensure_console_python():
+        return
+
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
@@ -410,13 +573,59 @@ def main() -> None:
         pass
 
     print_banner()
+
+    preferred_python = _resolve_preferred_python()
+    current_python = sys.executable
+    try:
+        preferred_resolved = str(Path(preferred_python).resolve())
+    except Exception:
+        preferred_resolved = preferred_python
+    try:
+        current_resolved = str(Path(current_python).resolve())
+    except Exception:
+        current_resolved = current_python
+
+    if preferred_resolved and preferred_resolved != current_resolved:
+        print(f"{Colors.YELLOW}⚠ Current Python: {current_python}{Colors.RESET}")
+        print(f"{Colors.GREEN}✓ Preferred Python found: {preferred_python}{Colors.RESET}")
+        switch_now = safe_input(
+            f"{Colors.BLUE}Relaunch with preferred Python now? (Y/n): {Colors.RESET}",
+            default="y",
+        ).lower()
+        if switch_now in ("", "y", "yes"):
+            if _relaunch_with_python(preferred_python):
+                print(f"{Colors.GREEN}✓ Opened a new window using preferred Python.{Colors.RESET}")
+                print(f"{Colors.YELLOW}You can close this window now.{Colors.RESET}")
+                return
     
     try:
         ensure_dependencies()
     except RuntimeError as e:
         print(f"{Colors.RED}❌ {e}{Colors.RESET}")
-        print(f"{Colors.YELLOW}Please install: pip install yt-dlp{Colors.RESET}")
-        return
+        print(f"{Colors.YELLOW}This Python executable is missing yt-dlp.{Colors.RESET}")
+
+        install_now = safe_input(
+            f"{Colors.BLUE}Install yt-dlp automatically now? (Y/n): {Colors.RESET}",
+            default="y",
+        ).lower()
+
+        if install_now in ("", "y", "yes"):
+            if _pip_install_yt_dlp(sys.executable):
+                try:
+                    ensure_dependencies()
+                except RuntimeError as retry_error:
+                    print(f"{Colors.RED}❌ Still missing after install attempt: {retry_error}{Colors.RESET}")
+                    print(f"{Colors.YELLOW}Manual install command:{Colors.RESET}")
+                    print(f"  {Colors.GRAY}{sys.executable} -m pip install yt-dlp{Colors.RESET}")
+                    return
+            else:
+                print(f"{Colors.YELLOW}Manual install command:{Colors.RESET}")
+                print(f"  {Colors.GRAY}{sys.executable} -m pip install yt-dlp{Colors.RESET}")
+                return
+        else:
+            print(f"{Colors.YELLOW}You can install later with:{Colors.RESET}")
+            print(f"  {Colors.GRAY}{sys.executable} -m pip install yt-dlp{Colors.RESET}")
+            return
 
     settings = load_settings()
 
@@ -428,8 +637,8 @@ def main() -> None:
         print(" X. Exit (press ESC to exit)")
 
         main_choice = safe_input(
-            f"\n{Colors.BLUE}Select option (1/2/3 or X to exit) [1]: {Colors.RESET}",
-            default="1",
+            f"\n{Colors.BLUE}Select option (1/2/3 or X to exit) [X]: {Colors.RESET}",
+            default="x",
             allow_escape=True,
         )
 
@@ -477,3 +686,5 @@ if __name__ == "__main__":
         print(f"\n\n{Colors.YELLOW}⚠ Process interrupted by user{Colors.RESET}")
     except Exception as e:
         print(f"\n{Colors.RED}❌ Unexpected error: {e}{Colors.RESET}")
+    finally:
+        pause_before_exit()

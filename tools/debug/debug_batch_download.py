@@ -8,7 +8,9 @@ archive_file = output_dir / 'archive.txt'
 for vid in suspects:
     url = f'https://www.youtube.com/watch?v={vid}'
     cmd = [
-        'yt-dlp',
+        'python',
+        '-m',
+        'yt_dlp',
         '--no-warnings',
         '-f', 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio',
         '--add-metadata',

@@ -92,7 +92,9 @@ class YTDLPWrapper:
         """Get playlist information from yt-dlp"""
         try:
             cmd = [
-                "yt-dlp",
+                "python",
+                "-m",
+                "yt_dlp",
                 "--flat-playlist",
                 "--dump-single-json",
                 "--quiet",
@@ -109,7 +111,8 @@ class YTDLPWrapper:
             )
             
             if result.returncode != 0:
-                logger.error(f"yt-dlp failed with error: {result.stderr[:200]}")
+                error_message = result.stderr if result.stderr else "(no error message)"
+                logger.error(f"yt-dlp failed with error: {error_message}")
                 return None
                 
             return json.loads(result.stdout) if result.stdout else None
@@ -119,6 +122,8 @@ class YTDLPWrapper:
             return None
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse yt-dlp output: {e}")
+            if result.stdout:
+                logger.debug(f"Raw output was {len(result.stdout)} chars: {result.stdout[:300]}...")
             return None
         except Exception as e:
             logger.error(f"Unexpected error getting playlist info: {e}")
@@ -150,7 +155,7 @@ class YTDLPWrapper:
                     f.write(f"{url}\n")
             
             # Build command
-            cmd = ["yt-dlp"]
+            cmd = ["python", "-m", "yt_dlp"]
 
             runtime = detected_js_runtime()
             if runtime:
@@ -1262,7 +1267,9 @@ def download_audio(video_id: str, output_folder: str) -> bool:
     output_folder.mkdir(parents=True, exist_ok=True)
     
     cmd = [
-        "yt-dlp",
+        "python",
+        "-m",
+        "yt_dlp",
         "-x",
         "--audio-format", "mp3",
         "--add-metadata",

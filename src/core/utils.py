@@ -24,8 +24,10 @@ JS_RUNTIME = ""
 
 def ensure_dependencies() -> None:
     """Ensure required dependencies are installed"""
-    if shutil.which("yt-dlp") is None:
-        raise RuntimeError("yt-dlp not found in PATH. Please install yt-dlp.")
+    try:
+        import yt_dlp
+    except ImportError:
+        raise RuntimeError("yt-dlp module not found. Please install it with: pip install yt-dlp")
 
     global JS_RUNTIME
     runtime = JS_RUNTIME or _detect_js_runtime()

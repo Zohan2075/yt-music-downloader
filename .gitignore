@@ -10,3 +10,15 @@ youtube_autosync/
 .venv/
 run.bat
 lunch.json
+
+# Generated reports
+CODE_ANALYSIS.md
+ANALYSIS_REPORT.md
+FIXES_SUMMARY.md
+MODIFICATION_MANIFEST.md
+COMPLETION_REPORT.md
+SYSTEM_PYTHON_TEST_RESULTS.md
+
+# Launcher scripts
+run_system_python.bat
+run_venv_python.bat

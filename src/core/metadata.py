@@ -54,7 +54,7 @@ class MetadataManager:
         if video_id:
             try:
                 result = subprocess.run(
-                    ["yt-dlp", "--dump-json", "--no-warnings", f"https://www.youtube.com/watch?v={video_id}"],
+                    ["python", "-m", "yt_dlp", "--dump-json", "--no-warnings", f"https://www.youtube.com/watch?v={video_id}"],
                     capture_output=True,
                     text=True,
                     timeout=12

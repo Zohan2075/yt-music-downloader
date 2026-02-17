@@ -31,8 +31,10 @@ url = f"https://www.youtube.com/watch?v={vid}"
 print('Testing download of', url)
 
 cmd = [
-    "yt-dlp",
-    "-v",
+    "python",
+    "-m",
+    "yt_dlp",
+    "-v"
     "-f", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio",
     "--add-metadata",
     "--restrict-filenames",

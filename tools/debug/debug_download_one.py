@@ -8,7 +8,9 @@ output_dir.mkdir(parents=True, exist_ok=True)
 archive_file = output_dir / 'archive.txt'
 
 cmd = [
-    'yt-dlp',
+    'python',
+    '-m',
+    'yt_dlp',
     '--no-warnings',
     '-f', 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio',
     '--add-metadata',
