@@ -17,6 +17,8 @@ from src.ui.colors import Colors
 AUDIO_EXTENSIONS = {'.mp3', '.m4a', '.webm', '.opus', '.flac', '.wav', '.ogg'}
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
 
+# Project root is two directories up from this file (src/core/utils.py -> root)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 COOKIES_FILE = "cookies.txt"
 JS_RUNTIMES = ["node", "deno", "quickjs", "bun"]
 JS_RUNTIME = ""
@@ -37,7 +39,8 @@ def ensure_dependencies() -> None:
         print(f"{Colors.YELLOW}⚠ yt-dlp will miss formats without a JS runtime (node/deno/quickjs/bun).{Colors.RESET}")
         print(f"{Colors.YELLOW}  Install one and ensure it's on PATH for best results.{Colors.RESET}")
 
-    if not Path(COOKIES_FILE).exists():
+    cookies_path = PROJECT_ROOT / COOKIES_FILE
+    if not cookies_path.exists():
         print(f"{Colors.YELLOW}⚠ Cookies file '{COOKIES_FILE}' not found. Age-restricted videos may fail.{Colors.RESET}")
         print(f"{Colors.YELLOW}  Export cookies and place them next to this script when needed.{Colors.RESET}")
 
@@ -51,7 +54,7 @@ def ytdlp_common_flags(debug: bool = False) -> List[str]:
 
 def cookies_path_if_exists() -> Optional[Path]:
     """Return cookies file Path if it exists, else None."""
-    p = Path(COOKIES_FILE)
+    p = PROJECT_ROOT / COOKIES_FILE
     return p if p.exists() else None
 
 

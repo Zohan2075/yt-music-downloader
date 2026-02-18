@@ -204,7 +204,7 @@ def _download_single_video_cli(url: str, folder: Path, display_name: str) -> boo
     safe_name = sanitize_filename(display_name) or "downloaded_track"
     output_template = str(folder / f"{safe_name}.%(ext)s")
 
-    cmd = ["python", "-m", "yt_dlp"]
+    cmd = ["python", "-m", "yt_dlp", "--remote-components", "ejs:github"]
     cmd.extend(ytdlp_common_flags(debug=False))
     cmd.extend(
         [

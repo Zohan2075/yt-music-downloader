@@ -507,8 +507,7 @@ def run_sync_mode(settings: Dict[str, Any]) -> None:
     base_path = Path(settings["download_path"])
     base_path.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n{Colors.GREEN}⬇ SYNC & AUTO-DOWNLOAD MODE: Syncing & auto-downloading new songs{Colors.RESET}")
-    print(f"{Colors.YELLOW}⚠ Will sync playlists, download new songs, and auto-clean/rename them{Colors.RESET}")
+    print(f"\n{Colors.GREEN}⬇ Syncing playlists{Colors.RESET}")
     print(f"{Colors.GRAY}Base folder: {base_path}{Colors.RESET}\n")
 
     debug_choice = safe_input(
@@ -518,7 +517,7 @@ def run_sync_mode(settings: Dict[str, Any]) -> None:
     debug_enabled = debug_choice in ("y", "yes")
     if debug_enabled:
         print(
-            f"{Colors.YELLOW}Debug mode enabled: yt-dlp logs and batch files will be written to each playlist folder{Colors.RESET}"
+            f"{Colors.YELLOW}Debug mode enabled: yt-dlp logs will be written to {PROJECT_ROOT / 'yt-dlp-logs'}{Colors.RESET}"
         )
 
     success_count = 0
@@ -546,17 +545,14 @@ def run_sync_mode(settings: Dict[str, Any]) -> None:
             time.sleep(0.5)
 
     print(f"\n{Colors.GREEN}{'='*60}{Colors.RESET}")
-    print(f"{Colors.BOLD}✅ Sync & Auto-download Complete!{Colors.RESET}")
+    print(f"{Colors.BOLD}✅ Sync Complete!{Colors.RESET}")
     print(
-        f"{Colors.GREEN}✓ Successfully processed: {success_count}/{len(playlists)} playlists{Colors.RESET}"
+        f"{Colors.GREEN}✓ Processed: {success_count}/{len(playlists)} playlists{Colors.RESET}"
     )
     if total_new_downloads > 0:
-        print(f"{Colors.GREEN}✓ New songs downloaded: {total_new_downloads}{Colors.RESET}")
-    else:
-        print(f"{Colors.YELLOW}✓ No new songs found to download{Colors.RESET}")
+        print(f"{Colors.GREEN}✓ Downloaded: {total_new_downloads} new song(s){Colors.RESET}")
     if total_removed > 0:
-        print(f"{Colors.RED}✓ Removed tracks no longer in the playlist: {total_removed}{Colors.RESET}")
-    print(f"{Colors.GREEN}✓ New downloads were automatically cleaned & renamed{Colors.RESET}")
+        print(f"{Colors.RED}✓ Removed: {total_removed} track(s) no longer in playlist{Colors.RESET}")
     print(f"{Colors.GREEN}✓ Location: {base_path}{Colors.RESET}")
     print(f"{Colors.GREEN}{'='*60}{Colors.RESET}")
 
@@ -631,10 +627,10 @@ def main() -> None:
 
     while True:
         print(f"{Colors.BLUE}Main Menu:{Colors.RESET}")
-        print(" 1. Sync and Auto-download/deletion")
-        print(" 2. Add or Remove Playlist")
-        print(" 3. Download a single song/video")
-        print(" X. Exit (press ESC to exit)")
+        print(" 1. Sync Playlists")
+        print(" 2. Manage Playlists")
+        print(" 3. Download Single Track")
+        print(" X. Exit")
 
         main_choice = safe_input(
             f"\n{Colors.BLUE}Select option (1/2/3 or X to exit) [X]: {Colors.RESET}",

@@ -171,6 +171,7 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
         try:
             cmd = [
                 "yt-dlp",
+                "--remote-components", "ejs:github",
                 "--flat-playlist",
                 "--skip-download",
                 "--dump-single-json",

@@ -95,6 +95,7 @@ class YTDLPWrapper:
                 "python",
                 "-m",
                 "yt_dlp",
+                "--remote-components", "ejs:github",
                 "--flat-playlist",
                 "--dump-single-json",
                 "--quiet",
@@ -160,6 +161,9 @@ class YTDLPWrapper:
             runtime = detected_js_runtime()
             if runtime:
                 cmd.extend(["--js-runtime", runtime])
+
+            # Enable remote components for YouTube signature solving
+            cmd.extend(["--remote-components", "ejs:github"])
 
             # In debug mode, add verbose flag
             cmd.extend(ytdlp_common_flags(debug=debug))
@@ -278,7 +282,7 @@ class YTDLPWrapper:
                         pass
 
             return DownloadResult(
-                success=(process.returncode == 0),
+                success=(not failures),
                 failures=failures,
                 downloaded=downloaded_count,
                 skipped_archive=skipped_archive,
@@ -707,10 +711,11 @@ class PlaylistSyncer:
                 progress_bar.update(count)
             
             if debug:
-                print(f"{Colors.YELLOW}Debug download enabled: yt-dlp logs and batch files will be kept in {self.playlist.folder}{Colors.RESET}")
-                log_dir = self.playlist.folder / "yt-dlp-logs"
+                from src.core.utils import PROJECT_ROOT
+                log_dir = PROJECT_ROOT / "yt-dlp-logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
                 log_path = log_dir / f"{sanitize_folder_name(self.playlist.name)}.log"
+                print(f"{Colors.YELLOW}Debug download enabled: yt-dlp logs will be kept in {log_dir}{Colors.RESET}")
                 print(f"{Colors.GRAY}➡ yt-dlp log: {log_path.resolve()}{Colors.RESET}")
             else:
                 log_path = None
@@ -1032,7 +1037,7 @@ class PlaylistSyncer:
         show_summary(
             folder=self.playlist.folder,
             total_files=len(self.file_processor.get_audio_files(self.playlist.folder)),
-            new_downloads=downloaded_count if not dry_run else len(new_videos),
+            downloaded=downloaded_count if not dry_run else len(new_videos),
             renamed=renamed,
             removed_missing=removed_missing
         )
@@ -1059,7 +1064,7 @@ class PlaylistSyncer:
             folder=self.playlist.folder,
             total_files=len(self.file_processor.get_audio_files(self.playlist.folder)),
             renamed=renamed,
-            duplicates_removed=duplicates
+            duplicates_removed=duplicates,
         )
         
         return {
@@ -1095,7 +1100,7 @@ class PlaylistSyncer:
         show_summary(
             folder=self.playlist.folder,
             total_files=len(self.file_processor.get_audio_files(self.playlist.folder)),
-            new_downloads=len(new_videos) if not dry_run else 0,
+            downloaded=len(new_videos) if not dry_run else 0,
             renamed=renamed,
             duplicates_removed=duplicates,
             removed_missing=removed_missing
@@ -1237,7 +1242,7 @@ def print_header(title: str):
 def show_summary(
     folder: Path,
     total_files: int,
-    new_downloads: int = 0,
+    downloaded: int = 0,
     renamed: int = 0,
     duplicates_removed: int = 0,
     removed_missing: int = 0
@@ -1247,15 +1252,14 @@ def show_summary(
     print(f"{Colors.BOLD}📊 Sync Summary:{Colors.RESET}")
     print(f" 📁 Folder: {Colors.CYAN}{folder}{Colors.RESET}")
     print(f" 🎵 Total tracks: {Colors.GREEN}{total_files}{Colors.RESET}")
+    print(f" ⬇ Downloaded: {Colors.GREEN}{downloaded}{Colors.RESET}")
     
-    if new_downloads > 0:
-        print(f" 🆕 New downloads: {Colors.GREEN}{new_downloads}{Colors.RESET}")
     if duplicates_removed > 0:
         print(f" 🗑️ Duplicates removed: {Colors.RED}{duplicates_removed}{Colors.RESET}")
     if renamed > 0:
         print(f" 🏷 Files renamed: {Colors.GREEN}{renamed}{Colors.RESET}")
     if removed_missing > 0:
-        print(f" 🔁 Playlist removals applied: {Colors.RED}{removed_missing}{Colors.RESET}")
+        print(f" 🔁 Removed from disk: {Colors.RED}{removed_missing}{Colors.RESET}")
     
     print(f"{Colors.GREEN}{'─'*60}{Colors.RESET}")
 
