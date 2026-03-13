@@ -52,8 +52,8 @@ def run_sync_mode(settings: Dict[str, Any]) -> None:
 
         if result.get("success", False):
             success_count += 1
-            total_new_downloads += result.get("new_downloads", 0)
-            total_removed += result.get("removed_missing", 0)
+        total_new_downloads += int(result.get("new_downloads", 0) or 0)
+        total_removed += int(result.get("removed_missing", 0) or 0)
 
         if index < len(playlists):
             time.sleep(0.5)

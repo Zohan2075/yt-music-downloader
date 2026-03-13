@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -117,7 +118,7 @@ def fetch_video_title(url: str, timeout: int = 15) -> Optional[str]:
     """Use yt-dlp to fetch a video's original title."""
     try:
         cmd = [
-            "python",
+            sys.executable,
             "-m",
             "yt_dlp",
             "--no-playlist",
@@ -204,7 +205,7 @@ def _download_single_video_cli(url: str, folder: Path, display_name: str) -> boo
     safe_name = sanitize_filename(display_name) or "downloaded_track"
     output_template = str(folder / f"{safe_name}.%(ext)s")
 
-    cmd = ["python", "-m", "yt_dlp", "--remote-components", "ejs:github"]
+    cmd = [sys.executable, "-m", "yt_dlp", "--remote-components", "ejs:github"]
     cmd.extend(ytdlp_common_flags(debug=False))
     cmd.extend(
         [

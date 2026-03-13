@@ -123,14 +123,22 @@ def _read_run_system_python_exe() -> str:
 
 def _resolve_preferred_python() -> str:
     """Resolve preferred interpreter path for this project (if available)."""
+    # 1. Explicit environment variable override
     env_override = os.environ.get("YPM_PYTHON_EXE", "").strip().strip('"')
     if env_override and Path(env_override).exists():
         return env_override
 
+    # 2. Project-local venv
     venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
     if venv_python.exists():
         return str(venv_python)
 
+    # 3. Known D:-drive system Python (user-configured default)
+    d_drive_python = Path(r"D:\1. Programming\python\python.exe")
+    if d_drive_python.exists():
+        return str(d_drive_python)
+
+    # 4. Batch-file heuristic
     bat_python = _read_run_system_python_exe()
     if bat_python:
         return bat_python
@@ -325,7 +333,7 @@ def fetch_video_title(url: str, timeout: int = 15) -> Optional[str]:
     """Use yt-dlp to fetch a video's original title."""
     try:
         cmd = [
-            "yt-dlp",
+            sys.executable, "-m", "yt_dlp",
             "--no-playlist",
             "--skip-download",
             "--print",
@@ -410,7 +418,7 @@ def _download_single_video_cli(url: str, folder: Path, display_name: str) -> boo
     safe_name = sanitize_filename(display_name) or "downloaded_track"
     output_template = str(folder / f"{safe_name}.%(ext)s")
 
-    cmd = ["yt-dlp"]
+    cmd = [sys.executable, "-m", "yt_dlp"]
     cmd.extend(ytdlp_common_flags(debug=False))
     cmd.extend([
         "-f",
@@ -538,8 +546,8 @@ def run_sync_mode(settings: Dict[str, Any]) -> None:
 
         if result.get("success", False):
             success_count += 1
-            total_new_downloads += result.get("new_downloads", 0)
-            total_removed += result.get("removed_missing", 0)
+        total_new_downloads += int(result.get("new_downloads", 0) or 0)
+        total_removed += int(result.get("removed_missing", 0) or 0)
 
         if index < len(playlists):
             time.sleep(0.5)

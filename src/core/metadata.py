@@ -5,6 +5,7 @@ Metadata extraction and formatting
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -54,7 +55,7 @@ class MetadataManager:
         if video_id:
             try:
                 result = subprocess.run(
-                    ["python", "-m", "yt_dlp", "--remote-components", "ejs:github", "--dump-json", "--no-warnings", f"https://www.youtube.com/watch?v={video_id}"],
+                    [sys.executable, "-m", "yt_dlp", "--remote-components", "ejs:github", "--dump-json", "--no-warnings", f"https://www.youtube.com/watch?v={video_id}"],
                     capture_output=True,
                     text=True,
                     timeout=12

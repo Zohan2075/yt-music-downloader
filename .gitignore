@@ -10,6 +10,7 @@ youtube_autosync/
 .venv/
 run.bat
 lunch.json
+agents.md
 
 # Generated reports
 CODE_ANALYSIS.md

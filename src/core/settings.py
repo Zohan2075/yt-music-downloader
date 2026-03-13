@@ -5,6 +5,7 @@ Settings management
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 import tkinter as tk
@@ -170,7 +171,7 @@ def setup_preferences(settings: Dict[str, Any]) -> Tuple[bool, List[Dict[str, st
         """
         try:
             cmd = [
-                "yt-dlp",
+                sys.executable, "-m", "yt_dlp",
                 "--remote-components", "ejs:github",
                 "--flat-playlist",
                 "--skip-download",

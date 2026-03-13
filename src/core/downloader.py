@@ -92,7 +92,7 @@ class YTDLPWrapper:
         """Get playlist information from yt-dlp"""
         try:
             cmd = [
-                "python",
+                sys.executable,
                 "-m",
                 "yt_dlp",
                 "--remote-components", "ejs:github",
@@ -156,7 +156,7 @@ class YTDLPWrapper:
                     f.write(f"{url}\n")
             
             # Build command
-            cmd = ["python", "-m", "yt_dlp"]
+            cmd = [sys.executable, "-m", "yt_dlp"]
 
             runtime = detected_js_runtime()
             if runtime:
@@ -690,10 +690,10 @@ class PlaylistSyncer:
             
             return new_videos
     
-    def download_videos(self, videos: List[VideoInfo], debug: bool = False) -> bool:
-        """Download specified videos. When debug=True, yt-dlp output will be logged."""
+    def download_videos(self, videos: List[VideoInfo], debug: bool = False) -> DownloadResult:
+        """Download specified videos and return detailed outcome counts."""
         if not videos:
-            return True
+            return DownloadResult(success=True, failures=[], downloaded=0, skipped_archive=0, skipped_existing=0)
         
         with self.operation_context("download"):
             print(f"\n{Colors.MAGENTA}⬇ Downloading {len(videos)} new song(s)...{Colors.RESET}")
@@ -737,9 +737,7 @@ class PlaylistSyncer:
                 debug=debug,
                 log_file_path=log_path,
             )
-            success = result.success
-            
-            if success:
+            if result.success:
                 details: List[str] = []
                 if result.downloaded:
                     details.append(f"downloaded {result.downloaded}")
@@ -754,8 +752,8 @@ class PlaylistSyncer:
 
             if result.failures:
                 self._report_failures(result.failures, log_path)
-            
-            return success
+
+            return result
     
     def clean_and_organize_files(self, dry_run: bool = False) -> Tuple[int, int]:
         """Clean, rename, and remove duplicates from all files."""
@@ -1014,8 +1012,9 @@ class PlaylistSyncer:
         else:
             # Download new videos (no dry-run for actual download)
             if not dry_run:
-                success = self.download_videos(new_videos, debug=debug)
-                downloaded_count = len(new_videos) if success else 0
+                download_result = self.download_videos(new_videos, debug=debug)
+                success = download_result.success
+                downloaded_count = download_result.downloaded
             else:
                 print(f"{Colors.YELLOW}Dry-run: Skipping actual downloads ({len(new_videos)} videos){Colors.RESET}")
                 downloaded_count = len(new_videos)
@@ -1046,7 +1045,8 @@ class PlaylistSyncer:
             "new_downloads": downloaded_count if not dry_run else len(new_videos),
             "renamed": renamed,
             "duplicates_removed": 0,
-            "removed_missing": removed_missing
+            "removed_missing": removed_missing,
+            "success": success,
         }
     
     def _sync_only_mode(self, dry_run: bool = False) -> Dict[str, Any]:
@@ -1081,10 +1081,15 @@ class PlaylistSyncer:
         new_videos = self.get_new_videos(videos)
         
         # Download new videos
+        downloaded_count = 0
+        success = True
         if new_videos and not dry_run:
-            self.download_videos(new_videos, debug=debug)
+            download_result = self.download_videos(new_videos, debug=debug)
+            downloaded_count = download_result.downloaded
+            success = download_result.success
         elif new_videos and dry_run:
             print(f"{Colors.YELLOW}Dry-run: would download {len(new_videos)} new videos{Colors.RESET}")
+            downloaded_count = len(new_videos)
         
         # Organize all files
         renamed, duplicates = self.clean_and_organize_files(dry_run=dry_run)
@@ -1100,17 +1105,18 @@ class PlaylistSyncer:
         show_summary(
             folder=self.playlist.folder,
             total_files=len(self.file_processor.get_audio_files(self.playlist.folder)),
-            downloaded=len(new_videos) if not dry_run else 0,
+            downloaded=downloaded_count,
             renamed=renamed,
             duplicates_removed=duplicates,
             removed_missing=removed_missing
         )
         
         return {
-            "new_downloads": len(new_videos) if not dry_run else 0,
+            "new_downloads": downloaded_count,
             "renamed": renamed,
             "duplicates_removed": duplicates,
-            "removed_missing": removed_missing
+            "removed_missing": removed_missing,
+            "success": success,
         }
     
     def _auto_new_mode(self) -> Dict[str, Any]:
@@ -1271,7 +1277,7 @@ def download_audio(video_id: str, output_folder: str) -> bool:
     output_folder.mkdir(parents=True, exist_ok=True)
     
     cmd = [
-        "python",
+        sys.executable,
         "-m",
         "yt_dlp",
         "-x",
